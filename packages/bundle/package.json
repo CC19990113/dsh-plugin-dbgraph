@@ -1,0 +1,51 @@
+{
+  "name": "dsh-plugin-dbgraph",
+  "version": "0.1.0",
+  "description": "Database structure for DeepSeek Harness — indexes a remote database catalog into a local index so the agent knows every table and column before it writes a query, then answers with one tool call",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "cordis-plugin",
+    "database",
+    "sql",
+    "mysql",
+    "postgresql",
+    "sqlite",
+    "mongodb",
+    "redis",
+    "schema",
+    "ai-agent",
+    "llm-tools",
+    "agent-tools"
+  ],
+  "license": "MIT",
+  "author": "CC ZHAO",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CC19990113/dsh-plugin-dbgraph.git",
+    "directory": "packages/bundle"
+  },
+  "homepage": "https://github.com/CC19990113/dsh-plugin-dbgraph#readme",
+  "bugs": "https://github.com/CC19990113/dsh-plugin-dbgraph/issues",
+  "type": "module",
+  "files": [
+    "cordis.patch.yml"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "dsh-plugin-dbgraph-catalog": "workspace:^",
+    "dsh-plugin-dbgraph-service": "workspace:^",
+    "dsh-plugin-dbgraph-store": "workspace:^",
+    "dsh-plugin-dbgraph-tool": "workspace:^"
+  }
+}

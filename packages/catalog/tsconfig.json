@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The base's cross-package `paths` map is source-to-source for vitest; `tsc -b`
+    // must resolve `dsh-plugin-dbgraph-service` through the project reference's
+    // built declarations, or this composite project would pull the other package's
+    // `src/*.ts` into its own program and violate `rootDir`.
+    "paths": {},
+    "rootDir": "src",
+    "outDir": "lib"
+  },
+  "include": ["src"],
+  "references": [{ "path": "../service" }]
+}

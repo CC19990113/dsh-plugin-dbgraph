@@ -1,0 +1,26 @@
+{
+  "name": "dbgraph-indexer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native index kernel for dsh-plugin-dbgraph: normalize a raw database catalog into terms and write the SQLite index",
+  "napi": {
+    "binaryName": "dbgraph-indexer",
+    "packageName": "dsh-plugin-dbgraph-indexer",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build": "bash build-addon.sh",
+    "build:napi": "napi build --platform --release --output-dir artifacts",
+    "test": "bash test-addon.sh",
+    "bench": "node --experimental-strip-types tools/bench.mjs 500 2",
+    "parity": "node --experimental-strip-types tools/parity.mjs 500",
+    "verify-fixtures": "node --experimental-strip-types tools/verify-ddl.mjs",
+    "gen-fixtures": "node --experimental-strip-types tools/gen-fixture.mjs"
+  }
+}

@@ -1,0 +1,6 @@
+packages:
+  - 'packages/*'
+allowBuilds:
+  '@napi-rs/cli': true
+onlyBuiltDependencies:
+  - '@napi-rs/cli'

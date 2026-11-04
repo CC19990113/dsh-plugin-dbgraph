@@ -1,0 +1,42 @@
+{
+  // Doubles as the resolution facade for vite-tsconfig-paths (vitest points
+  // here). NEVER add include/files: it would leak into every extending package
+  // project and narrow the facade's match-all scope.
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "declaration": true,
+    "sourceMap": true,
+    "declarationMap": true,
+    "composite": true,
+    "incremental": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    // Sources import siblings with an explicit `.ts` suffix; both flags are
+    // required to keep that working and still emit `.js` specifiers.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": false,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    // The sources build optional fields with conditional spreads and never
+    // assign `key: undefined`; turning this off would silently allow both.
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["node"],
+    "paths": {
+      "dsh-plugin-dbgraph-service": ["./packages/service/src"],
+      "dsh-plugin-dbgraph-service/invariant": ["./packages/service/src/invariant.ts"],
+      "dsh-plugin-dbgraph-catalog": ["./packages/catalog/src"],
+      "dsh-plugin-dbgraph-catalog/invariant": ["./packages/catalog/src/invariant.ts"],
+      "dsh-plugin-dbgraph-store": ["./packages/store/src"],
+      "dsh-plugin-dbgraph-store/invariant": ["./packages/store/src/invariant.ts"],
+      "dsh-plugin-dbgraph-tool": ["./packages/tool/src"],
+      "dsh-plugin-dbgraph-tool/invariant": ["./packages/tool/src/invariant.ts"]
+    }
+  }
+}

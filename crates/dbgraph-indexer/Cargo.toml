@@ -1,0 +1,50 @@
+[package]
+name = "dbgraph-indexer"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+publish = false
+description = "Native index kernel for dsh-plugin-dbgraph: normalize a raw database catalog into terms and write the SQLite index"
+
+[lib]
+# `cdylib` is the napi module Node `require`s. `rlib` is what lets the crate's own
+# integration tests (`tests/*.rs`) call the kernel directly, without a Node process.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# `serde-json` gives `serde_json::Value` a NAPI conversion, which is how the catalog
+# crosses the boundary as a real JS object rather than a stringified copy: the caller
+# passes `{ dbPath, schemaDdl, catalog, aliases, schemaVersion }` and the *worker*
+# thread parses it with serde, so a malformed catalog fails with a field-level message
+# instead of a type error at the call site.
+napi = { version = "3", features = ["napi8", "serde-json"] }
+napi-derive = "3"
+# `bundled` compiles the SQLite amalgamation into the addon, so the writer's FTS5
+# support does not depend on the host's SQLite. It is still verified at run time:
+# `write::verify_fts5` creates a throwaway virtual table before any real work.
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# Normalizing 1000 objects / 15000 columns into term rows is pure CPU work with no
+# shared state, so it runs on rayon; the SQLite write stays single-threaded.
+rayon = "1"
+# NFKC is part of the shared tokenizer contract (`tokenize.ts` normalizes before splitting), so
+# the Rust port needs real Unicode data rather than an approximation of it.
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+# The integration tests read the file the writer produced and compare it with the plan, so they
+# need their own SQLite handle. Same version as the dependency above: no extra compile.
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+opt-level = 3
+# napi hands a panic back to JS as a rejected promise; `unwind` is what makes the
+# `catch_unwind` in `lib.rs` able to turn it into an error instead of aborting the host.
+panic = "unwind"
+lto = "thin"
+codegen-units = 1

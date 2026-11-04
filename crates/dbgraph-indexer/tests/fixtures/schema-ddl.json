@@ -1,0 +1,13 @@
+[
+  "CREATE TABLE IF NOT EXISTS meta (\n     key   TEXT PRIMARY KEY,\n     value TEXT NOT NULL\n   )",
+  "CREATE TABLE IF NOT EXISTS objects (\n     id           INTEGER PRIMARY KEY,\n     kind         TEXT    NOT NULL,\n     schema_name  TEXT    NOT NULL DEFAULT '',\n     name         TEXT    NOT NULL,\n     comment      TEXT,\n     row_estimate INTEGER,\n     updated_at   INTEGER NOT NULL\n   )",
+  "CREATE UNIQUE INDEX IF NOT EXISTS objects_identity ON objects (schema_name, name)",
+  "CREATE TABLE IF NOT EXISTS columns (\n     id               INTEGER PRIMARY KEY,\n     object_id        INTEGER NOT NULL REFERENCES objects (id) ON DELETE CASCADE,\n     ordinal          INTEGER NOT NULL,\n     name             TEXT    NOT NULL,\n     type             TEXT    NOT NULL,\n     type_class       TEXT    NOT NULL,\n     nullable         INTEGER NOT NULL DEFAULT 1,\n     default_value    TEXT,\n     comment          TEXT,\n     is_primary_key   INTEGER NOT NULL DEFAULT 0,\n     is_unique        INTEGER NOT NULL DEFAULT 0,\n     enum_values_json TEXT,\n     updated_at       INTEGER NOT NULL\n   )",
+  "CREATE UNIQUE INDEX IF NOT EXISTS columns_identity ON columns (object_id, name)",
+  "CREATE TABLE IF NOT EXISTS edges (\n     id             INTEGER PRIMARY KEY,\n     src_object     INTEGER NOT NULL REFERENCES objects (id) ON DELETE CASCADE,\n     src_column_id  INTEGER REFERENCES columns (id) ON DELETE CASCADE,\n     kind           TEXT    NOT NULL,\n     dst_object     INTEGER REFERENCES objects (id) ON DELETE CASCADE,\n     dst_column_id  INTEGER REFERENCES columns (id) ON DELETE CASCADE,\n     name           TEXT\n   )",
+  "CREATE INDEX IF NOT EXISTS edges_src ON edges (src_object)",
+  "CREATE INDEX IF NOT EXISTS edges_dst ON edges (dst_object)",
+  "CREATE TABLE IF NOT EXISTS terms (\n     term      TEXT    NOT NULL,\n     weight    REAL    NOT NULL,\n     object_id INTEGER REFERENCES objects (id) ON DELETE CASCADE,\n     column_id INTEGER REFERENCES columns (id) ON DELETE CASCADE\n   )",
+  "CREATE INDEX IF NOT EXISTS terms_term ON terms (term)",
+  "CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5 (\n     text,\n     object_id UNINDEXED,\n     column_id UNINDEXED,\n     tokenize = 'unicode61'\n   )"
+]

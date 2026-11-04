@@ -1,0 +1,2271 @@
+{
+  "contract": {
+    "schemaVersion": 1,
+    "metaKeys": {
+      "schemaVersion": "schema_version",
+      "connection": "connection",
+      "engine": "engine",
+      "database": "database",
+      "serverVersion": "server_version",
+      "level": "level",
+      "fetchedAt": "fetched_at",
+      "l1IndexedAt": "l1_indexed_at",
+      "l2IndexedAt": "l2_indexed_at",
+      "writer": "writer",
+      "writtenAt": "written_at"
+    }
+  },
+  "catalog": {
+    "engine": "mysql",
+    "serverVersion": "8.0.36",
+    "database": "shop",
+    "objects": [
+      {
+        "kind": "table",
+        "schema": "shop",
+        "name": "sys_user",
+        "comment": "系统用户",
+        "rowEstimate": 12,
+        "columns": [
+          {
+            "name": "id",
+            "ordinal": 1,
+            "type": "bigint unsigned",
+            "nullable": false,
+            "comment": "主键",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "user_name",
+            "ordinal": 2,
+            "type": "varchar(64)",
+            "comment": "用户名"
+          },
+          {
+            "name": "login_pwd",
+            "ordinal": 3,
+            "type": "varchar(128)",
+            "comment": "登录密码"
+          },
+          {
+            "name": "phone",
+            "ordinal": 4,
+            "type": "varchar(20)",
+            "comment": "手机号"
+          },
+          {
+            "name": "is_deleted",
+            "ordinal": 5,
+            "type": "tinyint(1)",
+            "comment": "是否删除",
+            "defaultValue": "0"
+          },
+          {
+            "name": "created_at",
+            "ordinal": 6,
+            "type": "datetime",
+            "comment": "创建时间"
+          }
+        ],
+        "edges": [
+          {
+            "kind": "index",
+            "name": "uidx_phone",
+            "columns": [
+              "phone"
+            ],
+            "unique": true
+          }
+        ]
+      },
+      {
+        "kind": "table",
+        "schema": "shop",
+        "name": "order",
+        "comment": "订单主表",
+        "rowEstimate": 2048,
+        "columns": [
+          {
+            "name": "id",
+            "ordinal": 1,
+            "type": "bigint",
+            "nullable": false,
+            "isPrimaryKey": true
+          },
+          {
+            "name": "user_id",
+            "ordinal": 2,
+            "type": "bigint",
+            "nullable": false,
+            "comment": "下单用户"
+          },
+          {
+            "name": "order_no",
+            "ordinal": 3,
+            "type": "varchar(32)",
+            "comment": "订单编号",
+            "isUnique": true
+          },
+          {
+            "name": "status",
+            "ordinal": 4,
+            "type": "varchar(16)",
+            "comment": "订单状态",
+            "enumValues": [
+              "paid",
+              "pending",
+              "refunded"
+            ]
+          },
+          {
+            "name": "amount",
+            "ordinal": 5,
+            "type": "decimal(12,2)",
+            "comment": "订单金额"
+          },
+          {
+            "name": "remark",
+            "ordinal": 6,
+            "type": "varchar(255)",
+            "comment": "备注"
+          }
+        ],
+        "edges": [
+          {
+            "kind": "fk",
+            "name": "fk_order_user",
+            "columns": [
+              "user_id"
+            ],
+            "refObject": "sys_user",
+            "refColumns": [
+              "id"
+            ]
+          },
+          {
+            "kind": "index",
+            "name": "idx_order_status_channel",
+            "columns": [
+              "status",
+              "order_no"
+            ],
+            "unique": false
+          },
+          {
+            "kind": "fk",
+            "name": "fk_order_region",
+            "columns": [
+              "id"
+            ],
+            "refObject": "region",
+            "refColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "table",
+        "name": "order_item",
+        "columns": [
+          {
+            "name": "order_id",
+            "ordinal": 1,
+            "type": "bigint",
+            "nullable": false,
+            "isPrimaryKey": true
+          },
+          {
+            "name": "line_no",
+            "ordinal": 2,
+            "type": "int",
+            "nullable": false,
+            "isPrimaryKey": true
+          },
+          {
+            "name": "product_id",
+            "ordinal": 3,
+            "type": "bigint",
+            "comment": "商品"
+          },
+          {
+            "name": "quantity",
+            "ordinal": 4,
+            "type": "int",
+            "comment": "购买数量"
+          }
+        ],
+        "edges": [
+          {
+            "kind": "fk",
+            "name": "fk_item_order",
+            "columns": [
+              "order_id",
+              "line_no"
+            ],
+            "refObject": "shop.order",
+            "refColumns": [
+              "id",
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "view",
+        "schema": "shop",
+        "name": "v_paid_order",
+        "comment": "已支付订单视图",
+        "columns": [
+          {
+            "name": "order_no",
+            "ordinal": 1,
+            "type": "varchar(32)"
+          },
+          {
+            "name": "amount",
+            "ordinal": 2,
+            "type": "decimal(12,2)"
+          }
+        ],
+        "edges": [
+          {
+            "kind": "view_ref",
+            "name": "v_paid_order",
+            "columns": [],
+            "refObject": "order"
+          }
+        ]
+      },
+      {
+        "kind": "table",
+        "schema": "shop",
+        "name": "用户扩展",
+        "comment": "用户扩展信息",
+        "columns": [
+          {
+            "name": "用户ID",
+            "ordinal": 1,
+            "type": "bigint",
+            "comment": "用户主键"
+          },
+          {
+            "name": "昵称",
+            "ordinal": 2,
+            "type": "varchar(32)",
+            "comment": "昵称"
+          }
+        ]
+      },
+      {
+        "kind": "table",
+        "schema": "shop",
+        "name": "type_zoo",
+        "columns": [
+          {
+            "name": "c_int",
+            "ordinal": 1,
+            "type": "int"
+          },
+          {
+            "name": "c_bool",
+            "ordinal": 2,
+            "type": "tinyint(1)"
+          },
+          {
+            "name": "c_decimal",
+            "ordinal": 3,
+            "type": "numeric(10,2)"
+          },
+          {
+            "name": "c_string",
+            "ordinal": 4,
+            "type": "varchar(32)"
+          },
+          {
+            "name": "c_text",
+            "ordinal": 5,
+            "type": "longtext"
+          },
+          {
+            "name": "c_datetime",
+            "ordinal": 6,
+            "type": "timestamp"
+          },
+          {
+            "name": "c_json",
+            "ordinal": 7,
+            "type": "json"
+          },
+          {
+            "name": "c_binary",
+            "ordinal": 8,
+            "type": "varbinary(16)"
+          },
+          {
+            "name": "c_array",
+            "ordinal": 9,
+            "type": "integer[]"
+          },
+          {
+            "name": "c_custom",
+            "ordinal": 10,
+            "type": "some_custom_type"
+          },
+          {
+            "name": "c_empty",
+            "ordinal": 11,
+            "type": ""
+          }
+        ]
+      },
+      {
+        "kind": "table",
+        "schema": "shop",
+        "name": "wide_row",
+        "columns": [
+          {
+            "name": "col_001",
+            "ordinal": 1,
+            "type": "varchar(64)",
+            "comment": "宽表列"
+          },
+          {
+            "name": "col_002",
+            "ordinal": 2,
+            "type": "bigint",
+            "comment": "宽表列"
+          },
+          {
+            "name": "col_003",
+            "ordinal": 3,
+            "type": "datetime",
+            "comment": "宽表列"
+          },
+          {
+            "name": "col_004",
+            "ordinal": 4,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_005",
+            "ordinal": 5,
+            "type": "bigint"
+          },
+          {
+            "name": "col_006",
+            "ordinal": 6,
+            "type": "datetime"
+          },
+          {
+            "name": "col_007",
+            "ordinal": 7,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_008",
+            "ordinal": 8,
+            "type": "bigint"
+          },
+          {
+            "name": "col_009",
+            "ordinal": 9,
+            "type": "datetime"
+          },
+          {
+            "name": "col_010",
+            "ordinal": 10,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_011",
+            "ordinal": 11,
+            "type": "bigint"
+          },
+          {
+            "name": "col_012",
+            "ordinal": 12,
+            "type": "datetime"
+          },
+          {
+            "name": "col_013",
+            "ordinal": 13,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_014",
+            "ordinal": 14,
+            "type": "bigint"
+          },
+          {
+            "name": "col_015",
+            "ordinal": 15,
+            "type": "datetime"
+          },
+          {
+            "name": "col_016",
+            "ordinal": 16,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_017",
+            "ordinal": 17,
+            "type": "bigint"
+          },
+          {
+            "name": "col_018",
+            "ordinal": 18,
+            "type": "datetime"
+          },
+          {
+            "name": "col_019",
+            "ordinal": 19,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_020",
+            "ordinal": 20,
+            "type": "bigint"
+          },
+          {
+            "name": "col_021",
+            "ordinal": 21,
+            "type": "datetime"
+          },
+          {
+            "name": "col_022",
+            "ordinal": 22,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_023",
+            "ordinal": 23,
+            "type": "bigint"
+          },
+          {
+            "name": "col_024",
+            "ordinal": 24,
+            "type": "datetime"
+          },
+          {
+            "name": "col_025",
+            "ordinal": 25,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_026",
+            "ordinal": 26,
+            "type": "bigint"
+          },
+          {
+            "name": "col_027",
+            "ordinal": 27,
+            "type": "datetime"
+          },
+          {
+            "name": "col_028",
+            "ordinal": 28,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_029",
+            "ordinal": 29,
+            "type": "bigint"
+          },
+          {
+            "name": "col_030",
+            "ordinal": 30,
+            "type": "datetime"
+          },
+          {
+            "name": "col_031",
+            "ordinal": 31,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_032",
+            "ordinal": 32,
+            "type": "bigint"
+          },
+          {
+            "name": "col_033",
+            "ordinal": 33,
+            "type": "datetime"
+          },
+          {
+            "name": "col_034",
+            "ordinal": 34,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_035",
+            "ordinal": 35,
+            "type": "bigint"
+          },
+          {
+            "name": "col_036",
+            "ordinal": 36,
+            "type": "datetime"
+          },
+          {
+            "name": "col_037",
+            "ordinal": 37,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_038",
+            "ordinal": 38,
+            "type": "bigint"
+          },
+          {
+            "name": "col_039",
+            "ordinal": 39,
+            "type": "datetime"
+          },
+          {
+            "name": "col_040",
+            "ordinal": 40,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_041",
+            "ordinal": 41,
+            "type": "bigint"
+          },
+          {
+            "name": "col_042",
+            "ordinal": 42,
+            "type": "datetime"
+          },
+          {
+            "name": "col_043",
+            "ordinal": 43,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_044",
+            "ordinal": 44,
+            "type": "bigint"
+          },
+          {
+            "name": "col_045",
+            "ordinal": 45,
+            "type": "datetime"
+          },
+          {
+            "name": "col_046",
+            "ordinal": 46,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_047",
+            "ordinal": 47,
+            "type": "bigint"
+          },
+          {
+            "name": "col_048",
+            "ordinal": 48,
+            "type": "datetime"
+          },
+          {
+            "name": "col_049",
+            "ordinal": 49,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_050",
+            "ordinal": 50,
+            "type": "bigint"
+          },
+          {
+            "name": "col_051",
+            "ordinal": 51,
+            "type": "datetime"
+          },
+          {
+            "name": "col_052",
+            "ordinal": 52,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_053",
+            "ordinal": 53,
+            "type": "bigint"
+          },
+          {
+            "name": "col_054",
+            "ordinal": 54,
+            "type": "datetime"
+          },
+          {
+            "name": "col_055",
+            "ordinal": 55,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_056",
+            "ordinal": 56,
+            "type": "bigint"
+          },
+          {
+            "name": "col_057",
+            "ordinal": 57,
+            "type": "datetime"
+          },
+          {
+            "name": "col_058",
+            "ordinal": 58,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_059",
+            "ordinal": 59,
+            "type": "bigint"
+          },
+          {
+            "name": "col_060",
+            "ordinal": 60,
+            "type": "datetime"
+          },
+          {
+            "name": "col_061",
+            "ordinal": 61,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_062",
+            "ordinal": 62,
+            "type": "bigint"
+          },
+          {
+            "name": "col_063",
+            "ordinal": 63,
+            "type": "datetime"
+          },
+          {
+            "name": "col_064",
+            "ordinal": 64,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_065",
+            "ordinal": 65,
+            "type": "bigint"
+          },
+          {
+            "name": "col_066",
+            "ordinal": 66,
+            "type": "datetime"
+          },
+          {
+            "name": "col_067",
+            "ordinal": 67,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_068",
+            "ordinal": 68,
+            "type": "bigint"
+          },
+          {
+            "name": "col_069",
+            "ordinal": 69,
+            "type": "datetime"
+          },
+          {
+            "name": "col_070",
+            "ordinal": 70,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_071",
+            "ordinal": 71,
+            "type": "bigint"
+          },
+          {
+            "name": "col_072",
+            "ordinal": 72,
+            "type": "datetime"
+          },
+          {
+            "name": "col_073",
+            "ordinal": 73,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_074",
+            "ordinal": 74,
+            "type": "bigint"
+          },
+          {
+            "name": "col_075",
+            "ordinal": 75,
+            "type": "datetime"
+          },
+          {
+            "name": "col_076",
+            "ordinal": 76,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_077",
+            "ordinal": 77,
+            "type": "bigint"
+          },
+          {
+            "name": "col_078",
+            "ordinal": 78,
+            "type": "datetime"
+          },
+          {
+            "name": "col_079",
+            "ordinal": 79,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_080",
+            "ordinal": 80,
+            "type": "bigint"
+          },
+          {
+            "name": "col_081",
+            "ordinal": 81,
+            "type": "datetime"
+          },
+          {
+            "name": "col_082",
+            "ordinal": 82,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_083",
+            "ordinal": 83,
+            "type": "bigint"
+          },
+          {
+            "name": "col_084",
+            "ordinal": 84,
+            "type": "datetime"
+          },
+          {
+            "name": "col_085",
+            "ordinal": 85,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_086",
+            "ordinal": 86,
+            "type": "bigint"
+          },
+          {
+            "name": "col_087",
+            "ordinal": 87,
+            "type": "datetime"
+          },
+          {
+            "name": "col_088",
+            "ordinal": 88,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_089",
+            "ordinal": 89,
+            "type": "bigint"
+          },
+          {
+            "name": "col_090",
+            "ordinal": 90,
+            "type": "datetime"
+          },
+          {
+            "name": "col_091",
+            "ordinal": 91,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_092",
+            "ordinal": 92,
+            "type": "bigint"
+          },
+          {
+            "name": "col_093",
+            "ordinal": 93,
+            "type": "datetime"
+          },
+          {
+            "name": "col_094",
+            "ordinal": 94,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_095",
+            "ordinal": 95,
+            "type": "bigint"
+          },
+          {
+            "name": "col_096",
+            "ordinal": 96,
+            "type": "datetime"
+          },
+          {
+            "name": "col_097",
+            "ordinal": 97,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_098",
+            "ordinal": 98,
+            "type": "bigint"
+          },
+          {
+            "name": "col_099",
+            "ordinal": 99,
+            "type": "datetime"
+          },
+          {
+            "name": "col_100",
+            "ordinal": 100,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_101",
+            "ordinal": 101,
+            "type": "bigint"
+          },
+          {
+            "name": "col_102",
+            "ordinal": 102,
+            "type": "datetime"
+          },
+          {
+            "name": "col_103",
+            "ordinal": 103,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_104",
+            "ordinal": 104,
+            "type": "bigint"
+          },
+          {
+            "name": "col_105",
+            "ordinal": 105,
+            "type": "datetime"
+          },
+          {
+            "name": "col_106",
+            "ordinal": 106,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_107",
+            "ordinal": 107,
+            "type": "bigint"
+          },
+          {
+            "name": "col_108",
+            "ordinal": 108,
+            "type": "datetime"
+          },
+          {
+            "name": "col_109",
+            "ordinal": 109,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_110",
+            "ordinal": 110,
+            "type": "bigint"
+          },
+          {
+            "name": "col_111",
+            "ordinal": 111,
+            "type": "datetime"
+          },
+          {
+            "name": "col_112",
+            "ordinal": 112,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_113",
+            "ordinal": 113,
+            "type": "bigint"
+          },
+          {
+            "name": "col_114",
+            "ordinal": 114,
+            "type": "datetime"
+          },
+          {
+            "name": "col_115",
+            "ordinal": 115,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_116",
+            "ordinal": 116,
+            "type": "bigint"
+          },
+          {
+            "name": "col_117",
+            "ordinal": 117,
+            "type": "datetime"
+          },
+          {
+            "name": "col_118",
+            "ordinal": 118,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_119",
+            "ordinal": 119,
+            "type": "bigint"
+          },
+          {
+            "name": "col_120",
+            "ordinal": 120,
+            "type": "datetime"
+          },
+          {
+            "name": "col_121",
+            "ordinal": 121,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_122",
+            "ordinal": 122,
+            "type": "bigint"
+          },
+          {
+            "name": "col_123",
+            "ordinal": 123,
+            "type": "datetime"
+          },
+          {
+            "name": "col_124",
+            "ordinal": 124,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_125",
+            "ordinal": 125,
+            "type": "bigint"
+          },
+          {
+            "name": "col_126",
+            "ordinal": 126,
+            "type": "datetime"
+          },
+          {
+            "name": "col_127",
+            "ordinal": 127,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_128",
+            "ordinal": 128,
+            "type": "bigint"
+          },
+          {
+            "name": "col_129",
+            "ordinal": 129,
+            "type": "datetime"
+          },
+          {
+            "name": "col_130",
+            "ordinal": 130,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_131",
+            "ordinal": 131,
+            "type": "bigint"
+          },
+          {
+            "name": "col_132",
+            "ordinal": 132,
+            "type": "datetime"
+          },
+          {
+            "name": "col_133",
+            "ordinal": 133,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_134",
+            "ordinal": 134,
+            "type": "bigint"
+          },
+          {
+            "name": "col_135",
+            "ordinal": 135,
+            "type": "datetime"
+          },
+          {
+            "name": "col_136",
+            "ordinal": 136,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_137",
+            "ordinal": 137,
+            "type": "bigint"
+          },
+          {
+            "name": "col_138",
+            "ordinal": 138,
+            "type": "datetime"
+          },
+          {
+            "name": "col_139",
+            "ordinal": 139,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_140",
+            "ordinal": 140,
+            "type": "bigint"
+          },
+          {
+            "name": "col_141",
+            "ordinal": 141,
+            "type": "datetime"
+          },
+          {
+            "name": "col_142",
+            "ordinal": 142,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_143",
+            "ordinal": 143,
+            "type": "bigint"
+          },
+          {
+            "name": "col_144",
+            "ordinal": 144,
+            "type": "datetime"
+          },
+          {
+            "name": "col_145",
+            "ordinal": 145,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_146",
+            "ordinal": 146,
+            "type": "bigint"
+          },
+          {
+            "name": "col_147",
+            "ordinal": 147,
+            "type": "datetime"
+          },
+          {
+            "name": "col_148",
+            "ordinal": 148,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_149",
+            "ordinal": 149,
+            "type": "bigint"
+          },
+          {
+            "name": "col_150",
+            "ordinal": 150,
+            "type": "datetime"
+          },
+          {
+            "name": "col_151",
+            "ordinal": 151,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_152",
+            "ordinal": 152,
+            "type": "bigint"
+          },
+          {
+            "name": "col_153",
+            "ordinal": 153,
+            "type": "datetime"
+          },
+          {
+            "name": "col_154",
+            "ordinal": 154,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_155",
+            "ordinal": 155,
+            "type": "bigint"
+          },
+          {
+            "name": "col_156",
+            "ordinal": 156,
+            "type": "datetime"
+          },
+          {
+            "name": "col_157",
+            "ordinal": 157,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_158",
+            "ordinal": 158,
+            "type": "bigint"
+          },
+          {
+            "name": "col_159",
+            "ordinal": 159,
+            "type": "datetime"
+          },
+          {
+            "name": "col_160",
+            "ordinal": 160,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_161",
+            "ordinal": 161,
+            "type": "bigint"
+          },
+          {
+            "name": "col_162",
+            "ordinal": 162,
+            "type": "datetime"
+          },
+          {
+            "name": "col_163",
+            "ordinal": 163,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_164",
+            "ordinal": 164,
+            "type": "bigint"
+          },
+          {
+            "name": "col_165",
+            "ordinal": 165,
+            "type": "datetime"
+          },
+          {
+            "name": "col_166",
+            "ordinal": 166,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_167",
+            "ordinal": 167,
+            "type": "bigint"
+          },
+          {
+            "name": "col_168",
+            "ordinal": 168,
+            "type": "datetime"
+          },
+          {
+            "name": "col_169",
+            "ordinal": 169,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_170",
+            "ordinal": 170,
+            "type": "bigint"
+          },
+          {
+            "name": "col_171",
+            "ordinal": 171,
+            "type": "datetime"
+          },
+          {
+            "name": "col_172",
+            "ordinal": 172,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_173",
+            "ordinal": 173,
+            "type": "bigint"
+          },
+          {
+            "name": "col_174",
+            "ordinal": 174,
+            "type": "datetime"
+          },
+          {
+            "name": "col_175",
+            "ordinal": 175,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_176",
+            "ordinal": 176,
+            "type": "bigint"
+          },
+          {
+            "name": "col_177",
+            "ordinal": 177,
+            "type": "datetime"
+          },
+          {
+            "name": "col_178",
+            "ordinal": 178,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_179",
+            "ordinal": 179,
+            "type": "bigint"
+          },
+          {
+            "name": "col_180",
+            "ordinal": 180,
+            "type": "datetime"
+          },
+          {
+            "name": "col_181",
+            "ordinal": 181,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_182",
+            "ordinal": 182,
+            "type": "bigint"
+          },
+          {
+            "name": "col_183",
+            "ordinal": 183,
+            "type": "datetime"
+          },
+          {
+            "name": "col_184",
+            "ordinal": 184,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_185",
+            "ordinal": 185,
+            "type": "bigint"
+          },
+          {
+            "name": "col_186",
+            "ordinal": 186,
+            "type": "datetime"
+          },
+          {
+            "name": "col_187",
+            "ordinal": 187,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_188",
+            "ordinal": 188,
+            "type": "bigint"
+          },
+          {
+            "name": "col_189",
+            "ordinal": 189,
+            "type": "datetime"
+          },
+          {
+            "name": "col_190",
+            "ordinal": 190,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_191",
+            "ordinal": 191,
+            "type": "bigint"
+          },
+          {
+            "name": "col_192",
+            "ordinal": 192,
+            "type": "datetime"
+          },
+          {
+            "name": "col_193",
+            "ordinal": 193,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_194",
+            "ordinal": 194,
+            "type": "bigint"
+          },
+          {
+            "name": "col_195",
+            "ordinal": 195,
+            "type": "datetime"
+          },
+          {
+            "name": "col_196",
+            "ordinal": 196,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_197",
+            "ordinal": 197,
+            "type": "bigint"
+          },
+          {
+            "name": "col_198",
+            "ordinal": 198,
+            "type": "datetime"
+          },
+          {
+            "name": "col_199",
+            "ordinal": 199,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_200",
+            "ordinal": 200,
+            "type": "bigint"
+          },
+          {
+            "name": "col_201",
+            "ordinal": 201,
+            "type": "datetime"
+          },
+          {
+            "name": "col_202",
+            "ordinal": 202,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_203",
+            "ordinal": 203,
+            "type": "bigint"
+          },
+          {
+            "name": "col_204",
+            "ordinal": 204,
+            "type": "datetime"
+          },
+          {
+            "name": "col_205",
+            "ordinal": 205,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_206",
+            "ordinal": 206,
+            "type": "bigint"
+          },
+          {
+            "name": "col_207",
+            "ordinal": 207,
+            "type": "datetime"
+          },
+          {
+            "name": "col_208",
+            "ordinal": 208,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_209",
+            "ordinal": 209,
+            "type": "bigint"
+          },
+          {
+            "name": "col_210",
+            "ordinal": 210,
+            "type": "datetime"
+          },
+          {
+            "name": "col_211",
+            "ordinal": 211,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_212",
+            "ordinal": 212,
+            "type": "bigint"
+          },
+          {
+            "name": "col_213",
+            "ordinal": 213,
+            "type": "datetime"
+          },
+          {
+            "name": "col_214",
+            "ordinal": 214,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_215",
+            "ordinal": 215,
+            "type": "bigint"
+          },
+          {
+            "name": "col_216",
+            "ordinal": 216,
+            "type": "datetime"
+          },
+          {
+            "name": "col_217",
+            "ordinal": 217,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_218",
+            "ordinal": 218,
+            "type": "bigint"
+          },
+          {
+            "name": "col_219",
+            "ordinal": 219,
+            "type": "datetime"
+          },
+          {
+            "name": "col_220",
+            "ordinal": 220,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_221",
+            "ordinal": 221,
+            "type": "bigint"
+          },
+          {
+            "name": "col_222",
+            "ordinal": 222,
+            "type": "datetime"
+          },
+          {
+            "name": "col_223",
+            "ordinal": 223,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_224",
+            "ordinal": 224,
+            "type": "bigint"
+          },
+          {
+            "name": "col_225",
+            "ordinal": 225,
+            "type": "datetime"
+          },
+          {
+            "name": "col_226",
+            "ordinal": 226,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_227",
+            "ordinal": 227,
+            "type": "bigint"
+          },
+          {
+            "name": "col_228",
+            "ordinal": 228,
+            "type": "datetime"
+          },
+          {
+            "name": "col_229",
+            "ordinal": 229,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_230",
+            "ordinal": 230,
+            "type": "bigint"
+          },
+          {
+            "name": "col_231",
+            "ordinal": 231,
+            "type": "datetime"
+          },
+          {
+            "name": "col_232",
+            "ordinal": 232,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_233",
+            "ordinal": 233,
+            "type": "bigint"
+          },
+          {
+            "name": "col_234",
+            "ordinal": 234,
+            "type": "datetime"
+          },
+          {
+            "name": "col_235",
+            "ordinal": 235,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_236",
+            "ordinal": 236,
+            "type": "bigint"
+          },
+          {
+            "name": "col_237",
+            "ordinal": 237,
+            "type": "datetime"
+          },
+          {
+            "name": "col_238",
+            "ordinal": 238,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_239",
+            "ordinal": 239,
+            "type": "bigint"
+          },
+          {
+            "name": "col_240",
+            "ordinal": 240,
+            "type": "datetime"
+          },
+          {
+            "name": "col_241",
+            "ordinal": 241,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_242",
+            "ordinal": 242,
+            "type": "bigint"
+          },
+          {
+            "name": "col_243",
+            "ordinal": 243,
+            "type": "datetime"
+          },
+          {
+            "name": "col_244",
+            "ordinal": 244,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_245",
+            "ordinal": 245,
+            "type": "bigint"
+          },
+          {
+            "name": "col_246",
+            "ordinal": 246,
+            "type": "datetime"
+          },
+          {
+            "name": "col_247",
+            "ordinal": 247,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_248",
+            "ordinal": 248,
+            "type": "bigint"
+          },
+          {
+            "name": "col_249",
+            "ordinal": 249,
+            "type": "datetime"
+          },
+          {
+            "name": "col_250",
+            "ordinal": 250,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_251",
+            "ordinal": 251,
+            "type": "bigint"
+          },
+          {
+            "name": "col_252",
+            "ordinal": 252,
+            "type": "datetime"
+          },
+          {
+            "name": "col_253",
+            "ordinal": 253,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_254",
+            "ordinal": 254,
+            "type": "bigint"
+          },
+          {
+            "name": "col_255",
+            "ordinal": 255,
+            "type": "datetime"
+          },
+          {
+            "name": "col_256",
+            "ordinal": 256,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_257",
+            "ordinal": 257,
+            "type": "bigint"
+          },
+          {
+            "name": "col_258",
+            "ordinal": 258,
+            "type": "datetime"
+          },
+          {
+            "name": "col_259",
+            "ordinal": 259,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_260",
+            "ordinal": 260,
+            "type": "bigint"
+          },
+          {
+            "name": "col_261",
+            "ordinal": 261,
+            "type": "datetime"
+          },
+          {
+            "name": "col_262",
+            "ordinal": 262,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_263",
+            "ordinal": 263,
+            "type": "bigint"
+          },
+          {
+            "name": "col_264",
+            "ordinal": 264,
+            "type": "datetime"
+          },
+          {
+            "name": "col_265",
+            "ordinal": 265,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_266",
+            "ordinal": 266,
+            "type": "bigint"
+          },
+          {
+            "name": "col_267",
+            "ordinal": 267,
+            "type": "datetime"
+          },
+          {
+            "name": "col_268",
+            "ordinal": 268,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_269",
+            "ordinal": 269,
+            "type": "bigint"
+          },
+          {
+            "name": "col_270",
+            "ordinal": 270,
+            "type": "datetime"
+          },
+          {
+            "name": "col_271",
+            "ordinal": 271,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_272",
+            "ordinal": 272,
+            "type": "bigint"
+          },
+          {
+            "name": "col_273",
+            "ordinal": 273,
+            "type": "datetime"
+          },
+          {
+            "name": "col_274",
+            "ordinal": 274,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_275",
+            "ordinal": 275,
+            "type": "bigint"
+          },
+          {
+            "name": "col_276",
+            "ordinal": 276,
+            "type": "datetime"
+          },
+          {
+            "name": "col_277",
+            "ordinal": 277,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_278",
+            "ordinal": 278,
+            "type": "bigint"
+          },
+          {
+            "name": "col_279",
+            "ordinal": 279,
+            "type": "datetime"
+          },
+          {
+            "name": "col_280",
+            "ordinal": 280,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_281",
+            "ordinal": 281,
+            "type": "bigint"
+          },
+          {
+            "name": "col_282",
+            "ordinal": 282,
+            "type": "datetime"
+          },
+          {
+            "name": "col_283",
+            "ordinal": 283,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_284",
+            "ordinal": 284,
+            "type": "bigint"
+          },
+          {
+            "name": "col_285",
+            "ordinal": 285,
+            "type": "datetime"
+          },
+          {
+            "name": "col_286",
+            "ordinal": 286,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_287",
+            "ordinal": 287,
+            "type": "bigint"
+          },
+          {
+            "name": "col_288",
+            "ordinal": 288,
+            "type": "datetime"
+          },
+          {
+            "name": "col_289",
+            "ordinal": 289,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_290",
+            "ordinal": 290,
+            "type": "bigint"
+          },
+          {
+            "name": "col_291",
+            "ordinal": 291,
+            "type": "datetime"
+          },
+          {
+            "name": "col_292",
+            "ordinal": 292,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_293",
+            "ordinal": 293,
+            "type": "bigint"
+          },
+          {
+            "name": "col_294",
+            "ordinal": 294,
+            "type": "datetime"
+          },
+          {
+            "name": "col_295",
+            "ordinal": 295,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_296",
+            "ordinal": 296,
+            "type": "bigint"
+          },
+          {
+            "name": "col_297",
+            "ordinal": 297,
+            "type": "datetime"
+          },
+          {
+            "name": "col_298",
+            "ordinal": 298,
+            "type": "varchar(64)"
+          },
+          {
+            "name": "col_299",
+            "ordinal": 299,
+            "type": "bigint"
+          },
+          {
+            "name": "col_300",
+            "ordinal": 300,
+            "type": "datetime"
+          }
+        ]
+      }
+    ],
+    "fetchedAt": 1700000000000,
+    "level": "l2",
+    "warnings": [
+      "one object could not be read"
+    ]
+  },
+  "aliases": [
+    {
+      "meaning": "user",
+      "words": [
+        "用户",
+        "用户表",
+        "会员",
+        "账号",
+        "帐号",
+        "账户",
+        "使用者",
+        "人员",
+        "user",
+        "users",
+        "member",
+        "account",
+        "customer",
+        "client"
+      ]
+    },
+    {
+      "meaning": "password",
+      "words": [
+        "密码",
+        "口令",
+        "登录密码",
+        "登录口令",
+        "密钥",
+        "password",
+        "passwd",
+        "pwd",
+        "secret",
+        "credential",
+        "pass"
+      ]
+    },
+    {
+      "meaning": "name",
+      "words": [
+        "姓名",
+        "名字",
+        "用户名",
+        "昵称",
+        "真实姓名",
+        "全名",
+        "名称",
+        "name",
+        "realname",
+        "real_name",
+        "nickname",
+        "nick",
+        "fullname",
+        "full_name",
+        "username",
+        "user_name"
+      ]
+    },
+    {
+      "meaning": "phone",
+      "words": [
+        "手机",
+        "手机号",
+        "手机号码",
+        "电话",
+        "电话号码",
+        "联系方式",
+        "mobile",
+        "phone",
+        "phone_number",
+        "tel",
+        "telephone",
+        "contact"
+      ]
+    },
+    {
+      "meaning": "email",
+      "words": [
+        "邮箱",
+        "电子邮箱",
+        "电子邮件",
+        "邮件",
+        "email",
+        "mail",
+        "e_mail"
+      ]
+    },
+    {
+      "meaning": "idcard",
+      "words": [
+        "身份证",
+        "身份证号",
+        "证件",
+        "证件号",
+        "证件号码",
+        "idcard",
+        "id_card",
+        "identity",
+        "identity_card",
+        "card_no"
+      ]
+    },
+    {
+      "meaning": "gender",
+      "words": [
+        "性别",
+        "gender",
+        "sex"
+      ]
+    },
+    {
+      "meaning": "age",
+      "words": [
+        "年龄",
+        "岁数",
+        "age"
+      ]
+    },
+    {
+      "meaning": "birthday",
+      "words": [
+        "生日",
+        "出生日期",
+        "出生年月",
+        "birthday",
+        "birth",
+        "birth_date",
+        "dob"
+      ]
+    },
+    {
+      "meaning": "address",
+      "words": [
+        "地址",
+        "住址",
+        "收货地址",
+        "详细地址",
+        "address",
+        "addr",
+        "location",
+        "street"
+      ]
+    },
+    {
+      "meaning": "avatar",
+      "words": [
+        "头像",
+        "照片",
+        "图片",
+        "avatar",
+        "photo",
+        "picture",
+        "icon",
+        "image",
+        "thumb"
+      ]
+    },
+    {
+      "meaning": "status",
+      "words": [
+        "状态",
+        "是否",
+        "启用",
+        "禁用",
+        "status",
+        "state",
+        "flag",
+        "enabled",
+        "disabled",
+        "active"
+      ]
+    },
+    {
+      "meaning": "amount",
+      "words": [
+        "金额",
+        "价格",
+        "单价",
+        "总价",
+        "费用",
+        "花费",
+        "付款",
+        "amount",
+        "price",
+        "total",
+        "money",
+        "fee",
+        "cost",
+        "pay",
+        "payment",
+        "salary"
+      ]
+    },
+    {
+      "meaning": "order",
+      "words": [
+        "订单",
+        "交易",
+        "下单",
+        "order",
+        "orders",
+        "trade",
+        "deal",
+        "transaction",
+        "purchase"
+      ]
+    },
+    {
+      "meaning": "product",
+      "words": [
+        "商品",
+        "产品",
+        "货物",
+        "货品",
+        "product",
+        "goods",
+        "item",
+        "sku",
+        "commodity",
+        "spu"
+      ]
+    },
+    {
+      "meaning": "created",
+      "words": [
+        "创建",
+        "创建时间",
+        "添加时间",
+        "下单时间",
+        "created",
+        "create",
+        "created_at",
+        "createdat",
+        "gmt_create",
+        "insert",
+        "inserted"
+      ]
+    },
+    {
+      "meaning": "updated",
+      "words": [
+        "更新",
+        "更新时间",
+        "修改时间",
+        "变更时间",
+        "updated",
+        "update",
+        "updated_at",
+        "updatedat",
+        "gmt_modified",
+        "modified",
+        "modify"
+      ]
+    },
+    {
+      "meaning": "deleted",
+      "words": [
+        "删除",
+        "是否删除",
+        "已删除",
+        "deleted",
+        "delete",
+        "is_delete",
+        "isdel",
+        "removed",
+        "trashed"
+      ]
+    },
+    {
+      "meaning": "remark",
+      "words": [
+        "备注",
+        "说明",
+        "描述",
+        "详情",
+        "remark",
+        "note",
+        "memo",
+        "comment",
+        "description",
+        "desc",
+        "detail"
+      ]
+    },
+    {
+      "meaning": "title",
+      "words": [
+        "标题",
+        "题目",
+        "主题",
+        "title",
+        "subject",
+        "heading",
+        "caption"
+      ]
+    },
+    {
+      "meaning": "code",
+      "words": [
+        "编号",
+        "编码",
+        "代码",
+        "序列号",
+        "code",
+        "no",
+        "number",
+        "sn",
+        "uuid",
+        "serial",
+        "key"
+      ]
+    },
+    {
+      "meaning": "count",
+      "words": [
+        "数量",
+        "次数",
+        "个数",
+        "总量",
+        "count",
+        "num",
+        "qty",
+        "quantity",
+        "amount_count"
+      ]
+    },
+    {
+      "meaning": "type",
+      "words": [
+        "类型",
+        "种类",
+        "类别",
+        "分类",
+        "type",
+        "category",
+        "kind",
+        "class",
+        "sort"
+      ]
+    },
+    {
+      "meaning": "level",
+      "words": [
+        "等级",
+        "级别",
+        "层级",
+        "level",
+        "grade",
+        "rank",
+        "tier",
+        "priority"
+      ]
+    },
+    {
+      "meaning": "score",
+      "words": [
+        "分数",
+        "得分",
+        "评分",
+        "score",
+        "rating",
+        "points",
+        "grade_score"
+      ]
+    },
+    {
+      "meaning": "permission",
+      "words": [
+        "权限",
+        "角色",
+        "职权",
+        "role",
+        "roles",
+        "permission",
+        "authority",
+        "admin",
+        "privilege"
+      ]
+    },
+    {
+      "meaning": "department",
+      "words": [
+        "部门",
+        "组织",
+        "单位",
+        "department",
+        "dept",
+        "org",
+        "organization",
+        "team",
+        "group",
+        "company"
+      ]
+    },
+    {
+      "meaning": "ip",
+      "words": [
+        "ip",
+        "ip地址",
+        "ip_addr",
+        "ip_address",
+        "client_ip",
+        "remote_addr"
+      ]
+    },
+    {
+      "meaning": "device",
+      "words": [
+        "设备",
+        "机型",
+        "设备号",
+        "device",
+        "device_id",
+        "imei",
+        "oaid",
+        "idfa",
+        "android_id"
+      ]
+    },
+    {
+      "meaning": "login",
+      "words": [
+        "登录",
+        "登陆",
+        "最后登录",
+        "login",
+        "logon",
+        "signin",
+        "last_login",
+        "lastlogin"
+      ]
+    }
+  ]
+}

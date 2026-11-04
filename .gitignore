@@ -1,0 +1,20 @@
+node_modules/
+packages/service/lib/
+packages/catalog/lib/
+packages/store/lib/
+packages/tool/lib/
+coverage/
+*.tsbuildinfo
+.DS_Store
+.dbgraph/
+crates/**/target/
+crates/**/artifacts/
+*.node
+NOTES.local.md
+
+# Emitted beside sources by a stray non-build tsc invocation. These must never exist: Vite resolves
+# `./packages/x/src` to `index.js` BEFORE `index.ts`, so a stale emit silently shadows the source and
+# every test keeps passing against old code.
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.map

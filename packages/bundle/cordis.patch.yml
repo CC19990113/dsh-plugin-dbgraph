@@ -1,0 +1,29 @@
+# The dsh-plugin-dbgraph bundle patch: mounts the whole database-structure capability
+# as ONE layer over an existing dsh profile.
+#
+# Row order carries no load semantics — activation is service-availability driven — so the
+# seam may appear before or after the providers that fill it. The user's own profile patch
+# layer can address any row below by `id` to retune it (last write per row wins), e.g.
+# disabling a dialect's `engines` list or lowering the tool's `maxRows`.
+
+- insert:
+    # Service Definition: publishes ctx.dbgraph — the dialect registry, the single index-store
+    # reservation, and the nine normalized operations. Holds no store and reaches no server.
+    - id: dbgraph
+      name: 'dsh-plugin-dbgraph-service'
+
+    # Service Provider (dialects): one DatabaseDialect per engine. Each reaches one server family
+    # for a probe, an L1 snapshot, an L2 enrichment, and one execute. Registers dialects only.
+    - id: dbgraph-catalog
+      name: 'dsh-plugin-dbgraph-catalog'
+
+    # Service Provider (offline): the on-disk index under ~/.dsh/dbgraph — reader, JavaScript
+    # write path (the parity reference and the fallback), and the prompt-digest sidecar.
+    - id: dbgraph-store
+      name: 'dsh-plugin-dbgraph-store'
+
+    # Consumer: the model-facing `dbgraph` and `dbgraph_index` tools, their system-prompt
+    # section (the schema digest that removes the discovery round-trips), and the `/dbgraph`
+    # command.
+    - id: dbgraph-tool
+      name: 'dsh-plugin-dbgraph-tool'
