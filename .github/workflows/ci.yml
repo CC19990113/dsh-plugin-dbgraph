@@ -8,6 +8,24 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The MySQL suite skips itself when `DSH_DBGRAPH_TEST_MYSQL_DSN` is unset, and the coverage gate
+    # is perFile 100%: a skipped suite leaves catalog/src/mysql.ts near 14% and fails the build. A
+    # throwaway server keeps the gate honest instead of lowering it for CI.
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: dbgraph_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DSH_DBGRAPH_TEST_MYSQL_DSN: mysql://root@127.0.0.1:3306/dbgraph_test
     steps:
       - uses: actions/checkout@v4
 

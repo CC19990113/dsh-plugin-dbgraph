@@ -13,6 +13,23 @@ jobs:
   # nothing to build, and a job that produces nothing is a job that can only fail.
   publish:
     runs-on: ubuntu-latest
+    # The MySQL suite skips itself when `DSH_DBGRAPH_TEST_MYSQL_DSN` is unset, and the coverage gate
+    # is perFile 100%: a skipped suite leaves catalog/src/mysql.ts near 14% and fails the build.
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: dbgraph_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DSH_DBGRAPH_TEST_MYSQL_DSN: mysql://root@127.0.0.1:3306/dbgraph_test
     permissions:
       # Required for npm provenance: mints the OIDC token that lets npm attest this tarball was built
       # from this repo at this commit. Without it the publish still succeeds, but silently drops the
