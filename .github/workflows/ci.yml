@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # One version has to agree across every published package, the lockfile's
+      # pins and the minimumReleaseAgeExclude list. This gate fails here, before
+      # anything is published, rather than mid-release.
+      - name: Release version gate
+        run: pnpm run check:versions
+
+      # `tsc -b` is the only static gate: strict, noUnusedLocals/Parameters.
+      # It also builds `lib/`, which the tests import through the paths facade.
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      # The coverage thresholds are perFile 100%, so a new branch without a test
+      # is a CI failure rather than a slow drift.
+      - name: Test
+        run: pnpm run test:coverage

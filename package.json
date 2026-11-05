@@ -18,7 +18,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "clean": "tsc -b --clean",
-    "rust:build": "cd crates/dbgraph-indexer && pnpm run build"
+    "rust:build": "cd crates/dbgraph-indexer && pnpm run build",
+    "check:versions": "node scripts/check-release-versions.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
