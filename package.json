@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "license": "MIT",
+  "author": "CC ZHAO",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CC19990113/dsh-plugin-dbgraph.git"
+  },
+  "homepage": "https://github.com/CC19990113/dsh-plugin-dbgraph#readme",
+  "bugs": "https://github.com/CC19990113/dsh-plugin-dbgraph/issues",
   "packageManager": "pnpm@11.7.0",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
