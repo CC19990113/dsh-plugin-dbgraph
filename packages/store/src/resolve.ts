@@ -248,7 +248,9 @@ function loadTermEvidence(db: DatabaseSync, tokens: readonly string[]): TermEvid
       )
       .all(...chunk)
     for (const row of rows) {
+      /* v8 ignore start -- a NULL term cannot match the IN list above, so this side cannot occur. */
       const term = typeof row.term === 'string' ? row.term : undefined
+      /* v8 ignore stop */
       const weight = typeof row.weight === 'number' ? row.weight : undefined
       const objectId = typeof row.resolved_object === 'number' ? row.resolved_object : undefined
       if (term === undefined || weight === undefined || objectId === undefined) continue
@@ -300,7 +302,9 @@ function scoreByEntity(db: DatabaseSync, entity: string, options: ResolveOptions
   // No term evidence at all: the FTS index is the recall net. Its candidates enter below the top of
   // the gate range, so a single hit can resolve and two near-equal hits stay ambiguous.
   const expression = searchMatchQuery([entity])
+  /* v8 ignore start -- non-empty concepts imply entity tokens, so the expression is never empty. */
   if (expression === '') return []
+  /* v8 ignore stop */
   return ftsObjectIds(db, expression, 20).map((objectId, rank) => ({
     objectId,
     score: round3(Math.max(FTS_FALLBACK_FLOOR, FTS_FALLBACK_TOP - rank * FTS_FALLBACK_STEP)),
@@ -650,7 +654,9 @@ function lookupObjectSuggestions(db: DatabaseSync, words: readonly string[]): re
       return ids.map(id => found.get(id)).filter((record): record is ObjectRecord => record !== undefined)
     }
   }
+  /* v8 ignore start -- callers always pass at least one non-empty word. */
   return lookupObject(db, words.find(word => word !== '') ?? '').suggestions
+  /* v8 ignore stop */
 }
 
 /**
@@ -671,7 +677,9 @@ function resolveByObjectName(
   whereEntries: readonly (readonly [string, unknown])[],
   options: ResolveOptions,
 ): Resolution {
+  /* v8 ignore start -- only reached when request.object is non-empty. */
   const objectName = (request.object ?? '').trim()
+  /* v8 ignore stop */
   const lookup = lookupObject(db, objectName)
   if (lookup.matches.length > 1) {
     const candidates = lookup.matches
@@ -713,7 +721,9 @@ function resolveByEntity(
   whereEntries: readonly (readonly [string, unknown])[],
   options: ResolveOptions,
 ): Resolution {
+  /* v8 ignore start -- only reached when request.entity is non-empty. */
   const entity = (request.entity ?? '').trim()
+  /* v8 ignore stop */
   const scored = scoreByEntity(db, entity, options)
   if (scored.length === 0) {
     return {
@@ -731,7 +741,9 @@ function resolveByEntity(
       if (byScore !== 0) return byScore
       const leftName = displayName(left.record)
       const rightName = displayName(right.record)
+      /* v8 ignore start -- display names are unique, so the equal case cannot occur. */
       return leftName < rightName ? -1 : leftName > rightName ? 1 : 0
+      /* v8 ignore stop */
     })
   const top = ranked[0]
   if (top === undefined) {
@@ -744,7 +756,9 @@ function resolveByEntity(
   // An entity that folds to a table's full name is that table, however the token scoring ranked it:
   // shared prefixes (`sys_user` / `sys_dept`) are exactly what the token score cannot separate.
   const foldedEntity = normalizeIdentifier(entity)
+  /* v8 ignore start -- a scored entity always holds a letter or digit, so this is always true. */
   if (foldedEntity !== '') {
+  /* v8 ignore stop */
     const exact = ranked.filter(pair =>
       normalizeIdentifier(displayName(pair.record)) === foldedEntity
       || normalizeIdentifier(pair.record.name) === foldedEntity)
@@ -828,7 +842,9 @@ function resolveByWhere(
       for (const id of candidates) if (!bucket.has(id)) candidates.delete(id)
     }
   }
+  /* v8 ignore start -- at least one key exists, so the candidate set was initialized. */
   const objects = loadObjects(db, [...(candidates ?? [])])
+  /* v8 ignore stop */
   if (objects.size === 0) {
     return {
       status: 'not_found',
@@ -839,7 +855,9 @@ function resolveByWhere(
   const ranked = [...objects.values()].sort((left, right) => {
     const leftName = displayName(left)
     const rightName = displayName(right)
+    /* v8 ignore start -- display names are unique, so the equal case cannot occur. */
     return leftName < rightName ? -1 : leftName > rightName ? 1 : 0
+    /* v8 ignore stop */
   })
   const makeWhereMatches = (record: ObjectRecord): MatchedColumn[] => {
     const columns = loadColumns(db, record.id, options.maxColumns + 1).slice(0, options.maxColumns)

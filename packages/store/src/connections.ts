@@ -16,21 +16,11 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname } from 'node:path'
 import { DbgraphError, isValidConnectionId } from 'dsh-plugin-dbgraph-service'
 import type { ConnectionsFile, StoredConnection } from 'dsh-plugin-dbgraph-service'
+import { messageOf } from './message.ts'
 import { connectionsPath } from './paths.ts'
 
 /** Format version this build writes and the only one it understands. */
 export const CONNECTIONS_FORMAT_VERSION = 1
-
-/**
- * One thrown value's message.
- * @param error - the thrown value.
- * @returns a non-empty message.
- */
-function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string') return error
-  return JSON.stringify(error) ?? 'unknown error'
-}
 
 /**
  * Read one entry out of a parsed document, validating everything that could later become a path or a

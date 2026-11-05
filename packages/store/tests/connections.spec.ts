@@ -3,7 +3,7 @@
  * atomic, and the round-trip preserves what a configuration surface needs.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
 import { connectionsPath } from '../src/paths.ts'
 import { findConnection, readConnections, writeConnections } from '../src/connections.ts'
@@ -117,5 +117,76 @@ describe('writeConnections', () => {
       ),
     ).toThrow(expect.objectContaining({ code: 'DBGRAPH_MALFORMED_INDEX' }))
     expect(existsSync(connectionsPath(root))).toBe(false)
+  })
+})
+
+describe('readConnections validation', () => {
+  function withDocument(document: string): string {
+    const root = freshRoot()
+    writeFileSync(connectionsPath(root), document, 'utf8')
+    return root
+  }
+
+  it('rejects an entry that is not an object', () => {
+    const root = withDocument(JSON.stringify({ version: 1, connections: [42] }))
+    expect(() => readConnections(root)).toThrow(
+      expect.objectContaining({ code: 'DBGRAPH_MALFORMED_INDEX', message: expect.stringContaining('is not an object') }),
+    )
+  })
+
+  it('rejects an entry without an engine', () => {
+    const root = withDocument(JSON.stringify({ version: 1, connections: [{ id: 'shop' }] }))
+    expect(() => readConnections(root)).toThrow(
+      expect.objectContaining({ code: 'DBGRAPH_MALFORMED_INDEX', message: expect.stringContaining('has no engine') }),
+    )
+  })
+
+  it('rejects a document that is not an object', () => {
+    expect(() => readConnections(withDocument('null'))).toThrow(
+      expect.objectContaining({ code: 'DBGRAPH_MALFORMED_INDEX', message: expect.stringContaining('not an object') }),
+    )
+  })
+
+  it('rejects a document written for another format version', () => {
+    const root = withDocument(JSON.stringify({ version: 2, connections: [] }))
+    expect(() => readConnections(root)).toThrow(
+      expect.objectContaining({ code: 'DBGRAPH_MALFORMED_INDEX', message: expect.stringContaining('version 2') }),
+    )
+  })
+
+  it('rejects a document without a connections array', () => {
+    const root = withDocument(JSON.stringify({ version: 1, connections: {} }))
+    expect(() => readConnections(root)).toThrow(
+      expect.objectContaining({ code: 'DBGRAPH_MALFORMED_INDEX', message: expect.stringContaining('connections array') }),
+    )
+  })
+
+  it('reports an unreadable file rather than pretending there are no connections', () => {
+    const root = freshRoot()
+    // A directory where the file belongs: existsSync succeeds and the read fails.
+    mkdirSync(connectionsPath(root), { recursive: true })
+    expect(() => readConnections(root)).toThrow(
+      expect.objectContaining({ code: 'DBGRAPH_MALFORMED_INDEX', message: expect.stringContaining('unreadable') }),
+    )
+  })
+})
+
+describe('writeConnections failure paths', () => {
+  it('rejects an entry with a blank engine before touching the file', () => {
+    const root = freshRoot()
+    expect(() => writeConnections([{ id: 'shop', engine: '   ' }], root)).toThrow(
+      expect.objectContaining({ code: 'DBGRAPH_MALFORMED_INDEX', message: expect.stringContaining('has no engine') }),
+    )
+    expect(existsSync(connectionsPath(root))).toBe(false)
+  })
+
+  it('reports a rename failure and removes its staging file', () => {
+    const root = freshRoot()
+    // A directory where connections.json belongs makes the final rename impossible.
+    mkdirSync(connectionsPath(root), { recursive: true })
+    expect(() => writeConnections([{ id: 'shop', engine: 'mysql' }], root)).toThrow(
+      expect.objectContaining({ code: 'DBGRAPH_WRITE_FAILED' }),
+    )
+    expect(existsSync(`${connectionsPath(root)}.tmp`)).toBe(false)
   })
 })

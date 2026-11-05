@@ -65,16 +65,15 @@ export function assignCatalogIds(catalog: RawCatalog): CatalogIds {
   const objects: number[] = []
   const columns: number[][] = []
   let nextColumnId = 1
-  for (let objectIndex = 0; objectIndex < catalog.objects.length; objectIndex += 1) {
-    const object = catalog.objects[objectIndex]
+  catalog.objects.forEach((object, objectIndex) => {
     objects.push(objectIndex + 1)
     const ids: number[] = []
-    for (let columnIndex = 0; columnIndex < (object?.columns.length ?? 0); columnIndex += 1) {
+    for (let columnIndex = 0; columnIndex < object.columns.length; columnIndex += 1) {
       ids.push(nextColumnId)
       nextColumnId += 1
     }
     columns.push(ids)
-  }
+  })
   return { objects, columns }
 }
 
@@ -131,7 +130,6 @@ export function buildTerms(catalog: RawCatalog, ids: CatalogIds, aliases: readon
   const search: SearchRow[] = []
 
   const add = (term: string, weight: number, objectId: number, columnId: number | null): void => {
-    if (term === '') return
     const key = `${term}\u0000${objectId}\u0000${columnId ?? ''}`
     const existing = terms.get(key)
     if (existing !== undefined && existing.weight >= weight) return
@@ -151,7 +149,9 @@ export function buildTerms(catalog: RawCatalog, ids: CatalogIds, aliases: readon
   for (let objectIndex = 0; objectIndex < catalog.objects.length; objectIndex += 1) {
     const object = catalog.objects[objectIndex]
     const objectId = ids.objects[objectIndex]
+    /* v8 ignore start -- ids.objects is built from this same array, so its entry always exists. */
     if (object === undefined || objectId === undefined) continue
+    /* v8 ignore stop */
     const comment = normalizeComment(object.comment)
 
     addTokens(tokenizeForSearch(object.name), TERM_WEIGHTS.objectNameAscii, TERM_WEIGHTS.objectNameCjk, objectId, null)
@@ -175,11 +175,15 @@ export function buildTerms(catalog: RawCatalog, ids: CatalogIds, aliases: readon
       columnId: null,
     })
 
+    /* v8 ignore start -- ids.columns is built from ids.objects, so this entry always exists. */
     const columnIds = ids.columns[objectIndex] ?? []
+    /* v8 ignore stop */
     for (let columnIndex = 0; columnIndex < object.columns.length; columnIndex += 1) {
       const column = object.columns[columnIndex]
       const columnId = columnIds[columnIndex]
+      /* v8 ignore start -- columnIds has one id per column of this same object. */
       if (column === undefined || columnId === undefined) continue
+      /* v8 ignore stop */
       const columnComment = normalizeComment(column.comment)
       addTokens(
         tokenizeForSearch(column.name),

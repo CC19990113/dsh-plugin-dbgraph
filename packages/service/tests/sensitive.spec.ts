@@ -71,6 +71,21 @@ describe('sensitive column matching', () => {
     expect(isSensitiveColumn('session_key')).toBe(false)
   })
 
+  it('treats a name with nothing alphanumeric in it as not sensitive', () => {
+    // A column literally named `__` or `()` carries no word to match; the empty normalisation is
+    // what stops the substring rules from answering "yes" to everything.
+    for (const name of ['__', '()', '  ', '---']) {
+      expect(isSensitiveColumn(name), name).toBe(false)
+    }
+  })
+
+  it('ignores a configured pattern that normalises to nothing', () => {
+    // A deployment may write a pattern as prose (`-`); an empty needle must match nothing rather
+    // than every column.
+    expect(isSensitiveColumn('user_name', ['---'])).toBe(false)
+    expect(isSensitiveColumn('user_name', ['---', 'name'])).toBe(true)
+  })
+
   it('exposes the vocabulary it matched', () => {
     for (const word of SENSITIVE_CJK_WORDS) expect(isSensitiveColumn(`user_${word}`), word).toBe(true)
     for (const token of SENSITIVE_COLUMN_TOKENS) expect(isSensitiveColumn(token), token).toBe(true)

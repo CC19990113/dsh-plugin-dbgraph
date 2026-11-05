@@ -56,8 +56,10 @@ function buildDigest(
         columns: object.columns.length,
       }
     })
+    /* v8 ignore start -- display names are unique (objects_identity), so the equal case cannot occur. */
     .sort((left, right) =>
       right.columns - left.columns || (left.object < right.object ? -1 : left.object > right.object ? 1 : 0))
+    /* v8 ignore stop */
   const digest = ranked.slice(0, maxEntries)
   return { digest, omitted: ranked.length - digest.length }
 }

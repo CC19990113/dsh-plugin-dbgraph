@@ -17,6 +17,7 @@ import {
   INDEX_META_KEYS,
   INDEX_SCHEMA_VERSION,
 } from 'dsh-plugin-dbgraph-service'
+import { messageOf } from './message.ts'
 
 /** An open index and the `meta` rows read from it. */
 export interface OpenedIndex {
@@ -33,17 +34,6 @@ interface PoolEntry {
   readonly identity: string
   /** Monotonic last-use counter for LRU eviction. */
   lastUsed: number
-}
-
-/**
- * One thrown value's message.
- * @param error - the thrown value.
- * @returns a non-empty message.
- */
-function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string') return error
-  return JSON.stringify(error) ?? 'unknown error'
 }
 
 /**
@@ -191,17 +181,12 @@ export class IndexPool {
 
   private evictIfNeeded(): void {
     if (this.entries.size <= this.maxOpen) return
-    let oldestPath: string | undefined
-    let oldest: PoolEntry | undefined
-    for (const [path, entry] of this.entries) {
-      if (oldest === undefined || entry.lastUsed < oldest.lastUsed) {
-        oldest = entry
-        oldestPath = path
-      }
+    // The pool is non-empty here: its size exceeds `maxOpen`, which is at least 1.
+    let victim = this.entries.entries().next().value as [string, PoolEntry]
+    for (const candidate of this.entries) {
+      if (candidate[1].lastUsed < victim[1].lastUsed) victim = candidate
     }
-    if (oldest !== undefined && oldestPath !== undefined) {
-      this.closeEntry(oldest)
-      this.entries.delete(oldestPath)
-    }
+    this.closeEntry(victim[1])
+    this.entries.delete(victim[0])
   }
 }

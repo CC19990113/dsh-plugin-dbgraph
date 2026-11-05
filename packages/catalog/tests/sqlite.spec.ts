@@ -73,6 +73,7 @@ CREATE TABLE accounts (
 
 CREATE UNIQUE INDEX uq_accounts_email ON accounts (email);
 CREATE UNIQUE INDEX uq_accounts_tenant_email ON accounts (tenant, email);
+CREATE INDEX idx_accounts_lower_email ON accounts (lower(email));
 
 CREATE INDEX idx_orders_user ON orders (user_id);
 
@@ -86,6 +87,27 @@ CREATE TABLE api_keys (
 CREATE TABLE people (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL
+);
+
+CREATE TABLE shipments (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL,
+  line_no INTEGER NOT NULL,
+  carrier TEXT,
+  FOREIGN KEY (order_id, line_no) REFERENCES order_items (order_id, line_no)
+);
+
+CREATE TABLE legacy_notes (
+  id INTEGER PRIMARY KEY,
+  person_id INTEGER,
+  body TEXT,
+  FOREIGN KEY (person_id) REFERENCES people
+);
+
+CREATE TABLE metrics (
+  id INTEGER PRIMARY KEY,
+  kind "SET",
+  payload "SET"
 );
 
 CREATE VIEW v_user_names AS SELECT id, name FROM users;
@@ -127,6 +149,16 @@ function buildDatabase(path: string): void {
     const people = database.prepare('INSERT INTO people (id, name) VALUES (?, ?)')
     people.run(1, '张三')
     people.run(2, '李四')
+    const shipments = database.prepare(
+      'INSERT INTO shipments (id, order_id, line_no, carrier) VALUES (?, ?, ?, ?)',
+    )
+    shipments.run(1, 10, 1, 'sf')
+    const notes = database.prepare('INSERT INTO legacy_notes (id, person_id, body) VALUES (?, ?, ?)')
+    notes.run(1, 1, 'note-a')
+    notes.run(2, 2, 'note-b')
+    const metrics = database.prepare('INSERT INTO metrics (id, kind, payload) VALUES (?, ?, ?)')
+    metrics.run(1, 1, Uint8Array.from([0]))
+    metrics.run(2, 2, Uint8Array.from([1]))
     database.prepare('INSERT INTO wide_300 (c001, c002) VALUES (?, ?)').run('alpha', 7)
   } finally {
     database.close()
@@ -214,9 +246,12 @@ describe('sqlite fetchL1', () => {
     expect(l1.objects.map(object => object.name)).toEqual([
       'accounts',
       'api_keys',
+      'legacy_notes',
+      'metrics',
       'order_items',
       'orders',
       'people',
+      'shipments',
       'users',
       'v_user_names',
       'wide_300',
@@ -328,6 +363,55 @@ describe('sqlite fetchL2', () => {
     expect(accountsIndexes.map(edge => edge.name).sort()).toEqual(['uq_accounts_email', 'uq_accounts_tenant_email'])
   })
 
+  it('keeps a composite foreign key in declared column order', () => {
+    const shipments = objectNamed(l2, 'shipments')
+    const foreignKeys = (shipments.edges ?? []).filter(edge => edge.kind === 'fk')
+    expect(foreignKeys).toHaveLength(1)
+    expect(foreignKeys[0]).toMatchObject({
+      kind: 'fk',
+      columns: ['order_id', 'line_no'],
+      refObject: 'order_items',
+      refColumns: ['order_id', 'line_no'],
+    })
+  })
+
+  it('records a foreign key that names no referenced columns without refColumns', () => {
+    const notes = objectNamed(l2, 'legacy_notes')
+    const foreignKeys = (notes.edges ?? []).filter(edge => edge.kind === 'fk')
+    expect(foreignKeys).toHaveLength(1)
+    expect(foreignKeys[0]).toMatchObject({ kind: 'fk', columns: ['person_id'], refObject: 'people' })
+    const edge = foreignKeys[0]
+    expect(edge !== undefined && 'refColumns' in edge).toBe(false)
+  })
+
+  it('skips an expression index rather than recording a column list it cannot express', () => {
+    const accounts = objectNamed(l2, 'accounts')
+    expect((accounts.edges ?? []).some(edge => edge.name === 'idx_accounts_lower_email')).toBe(false)
+    expect((accounts.edges ?? []).filter(edge => edge.kind === 'index')).toHaveLength(2)
+  })
+
+  it('samples numeric affinity type columns as text and skips what it cannot render', () => {
+    const metrics = objectNamed(l2, 'metrics')
+    // `SET` is string-like by declaration but has NUMERIC affinity, so the sampled literals are
+    // numbers; they are still vocabulary and convert to text.
+    expect([...(columnNamed(metrics, 'kind').enumValues ?? [])].sort()).toEqual(['1', '2'])
+    // A binary value in the same column type has no enum rendering, and produces no sample at all.
+    expect(columnNamed(metrics, 'payload')).not.toHaveProperty('enumValues')
+  })
+
+  it('reports L2 without a server version when the L1 snapshot carried none', async () => {
+    const bare: RawCatalog = {
+      engine: l1.engine,
+      database: l1.database,
+      objects: l1.objects,
+      fetchedAt: l1.fetchedAt,
+      level: l1.level,
+    }
+    const enriched = await dialect.fetchL2(input, bare)
+    expect(enriched.serverVersion).toBeUndefined()
+    expect(enriched.objects.map(object => object.name)).toEqual(l1.objects.map(object => object.name))
+  })
+
   it('marks a column unique only when a single-column unique index or primary key covers it', () => {
     const accounts = objectNamed(l2, 'accounts')
     expect(columnNamed(accounts, 'email').isUnique).toBe(true)
@@ -370,6 +454,15 @@ describe('sqlite fetchL2', () => {
     const limited = await dialect.fetchL2({ ...input, enumSampleLimit: 1 }, l1)
     const status = columnNamed(objectNamed(limited, 'users'), 'status')
     expect(status.enumValues).toHaveLength(1)
+  })
+
+  it('samples nothing when the limit is not a usable number', async () => {
+    for (const enumSampleLimit of [0, Number.NaN]) {
+      const unsampled = await dialect.fetchL2({ ...input, enumSampleLimit }, l1)
+      expect(columnNamed(objectNamed(unsampled, 'users'), 'status')).not.toHaveProperty('enumValues')
+      // Enrichment itself still ran: edges are there even though no literal was sampled.
+      expect(objectNamed(unsampled, 'orders').edges?.length).toBeGreaterThan(0)
+    }
   })
 
   it('samples a view\'s rows for nothing and leaves its edges empty', () => {
@@ -616,6 +709,21 @@ describe('sqlite execute parameter binding', () => {
     expect(result.rows).toEqual([{ flag: 1, stamp: '2024-01-02T03:04:05.000Z' }])
   })
 
+  it('binds null, false and binary values to their SQLite representations', async () => {
+    const result = await dialect.execute(
+      input,
+      'SELECT ? AS nihil, ? AS flag, ? AS payload, ? AS stamp',
+      READ_ONLY_LIMITS,
+      [null, false, Uint8Array.from([1, 2]), new Date(Number.NaN)],
+    )
+    expect(result.rows[0]).toEqual({
+      nihil: null,
+      flag: 0,
+      payload: '0x0102 (2 bytes)',
+      stamp: 'Invalid Date',
+    })
+  })
+
   it('refuses a value SQLite cannot represent instead of silently binding something else', async () => {
     try {
       await dialect.execute(input, 'SELECT ? AS value', READ_ONLY_LIMITS, [{ nested: true }])
@@ -673,6 +781,23 @@ describe('sqlite configuration and abort handling', () => {
       enumSampleLimit: 10,
       queryTimeoutMs: 1_000,
     })).rejects.toMatchObject({ code: 'DBGRAPH_UNAVAILABLE' })
+    expect(existsSync(missing)).toBe(false)
+  })
+
+  it('names the writable mode when a writable open fails', async () => {
+    const missing = join(directory, 'nested', 'writable.db')
+    try {
+      await dialect.execute(
+        { ...input, connection: { ...input.connection, database: missing } },
+        "INSERT INTO people (id, name) VALUES (1, 'x')",
+        { ...READ_ONLY_LIMITS, readOnly: false },
+      )
+      expect.unreachable('opening a file in a missing directory should have failed')
+    } catch (error) {
+      expect(error).toBeInstanceOf(DbgraphError)
+      expect((error as DbgraphError).code).toBe('DBGRAPH_UNAVAILABLE')
+      expect((error as DbgraphError).message).toContain('for writing')
+    }
     expect(existsSync(missing)).toBe(false)
   })
 

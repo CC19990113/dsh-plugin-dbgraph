@@ -116,6 +116,20 @@ describe('renderDbgraph', () => {
     expect(renderDbgraph(value)).toContain('analytics (postgres) pg.internal — 1 表 / 2 列, credential configured')
   })
 
+  it('reports a missing credential for a server connection that has none', () => {
+    // A server needs an account; saying nothing would read as "nothing to configure", which is the
+    // one thing a connection list must not imply.
+    const value: DbgraphValueFor<'connections'> = {
+      operation: 'connections',
+      connections: [{
+        id: 'reporting', engine: 'mysql', host: 'mysql.internal', credential_configured: false,
+        index: { objects: 0, columns: 0, stale: true },
+      }],
+    }
+    expect(renderDbgraph(value))
+      .toContain('reporting (mysql) mysql.internal — not indexed, credential missing')
+  })
+
   it('renders an object line with no comment and no row estimate', () => {
     const value: DbgraphValueFor<'objects'> = {
       operation: 'objects', connection: 'prod', truncated: false,

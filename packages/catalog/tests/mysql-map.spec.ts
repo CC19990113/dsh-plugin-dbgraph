@@ -77,6 +77,10 @@ describe('mysqlTableFacts', () => {
   it('accepts a numeric row estimate as well as a string one', () => {
     expect(mysqlTableFacts({ TABLE_TYPE: 'BASE TABLE', TABLE_ROWS: 7 }).rowEstimate).toBe(7)
   })
+
+  it('treats a row with no TABLE_TYPE as a base table and no comment', () => {
+    expect(mysqlTableFacts({ TABLE_NAME: 'bare' })).toEqual({ kind: 'table' })
+  })
 })
 
 describe('groupMysqlColumns', () => {
@@ -101,6 +105,25 @@ describe('groupMysqlColumns', () => {
   it('does not claim a single-column unique from COLUMN_KEY UNI', () => {
     const email = groupMysqlColumns(COLUMN_ROWS).get('users')?.[2]
     expect(email && 'isUnique' in email).toBe(false)
+  })
+
+  it('falls back to defaults when a row omits its facts', () => {
+    const grouped = groupMysqlColumns([
+      { TABLE_NAME: 'sparse', COLUMN_NAME: 'c' },
+    ])
+    expect(grouped.get('sparse')).toEqual([
+      { name: 'c', ordinal: 1, type: '', nullable: true, isPrimaryKey: false },
+    ])
+  })
+
+  it('drops a row the driver returned without a table or column name', () => {
+    const grouped = groupMysqlColumns([
+      { COLUMN_NAME: 'orphan' },
+      { TABLE_NAME: 'kept' },
+      { TABLE_NAME: 'kept', COLUMN_NAME: 'c' },
+    ])
+    expect([...grouped.keys()]).toEqual(['kept'])
+    expect(grouped.get('kept')?.map(column => column.name)).toEqual(['c'])
   })
 })
 
@@ -183,6 +206,34 @@ describe('groupMysqlForeignKeys', () => {
     ])
     expect(edges.size).toBe(0)
   })
+
+  it('records a constraint the server did not name, ordered by its fallback position', () => {
+    const edges = groupMysqlForeignKeys([
+      { TABLE_NAME: 'child', COLUMN_NAME: 'b', REFERENCED_TABLE_NAME: 'parent', REFERENCED_COLUMN_NAME: 'y' },
+      { TABLE_NAME: 'child', COLUMN_NAME: 'a', REFERENCED_TABLE_NAME: 'parent', REFERENCED_COLUMN_NAME: 'x' },
+    ])
+    const childEdges = edges.get('child')
+    expect(childEdges).toHaveLength(1)
+    // No ordinals were reported, so rows keep their arrival order.
+    expect(childEdges?.[0]).toMatchObject({
+      kind: 'fk',
+      columns: ['b', 'a'],
+      refObject: 'parent',
+      refColumns: ['y', 'x'],
+    })
+    const unnamed = childEdges?.[0]
+    expect(unnamed !== undefined && 'name' in unnamed).toBe(false)
+  })
+
+  it('drops a row the driver returned without a table, column or referenced side', () => {
+    const edges = groupMysqlForeignKeys([
+      { COLUMN_NAME: 'orphan', REFERENCED_TABLE_NAME: 'p', REFERENCED_COLUMN_NAME: 'id' },
+      { TABLE_NAME: 'child', REFERENCED_TABLE_NAME: 'p', REFERENCED_COLUMN_NAME: 'id' },
+      { TABLE_NAME: 'child', COLUMN_NAME: 'c', REFERENCED_COLUMN_NAME: 'id' },
+      { TABLE_NAME: 'child', COLUMN_NAME: 'c', REFERENCED_TABLE_NAME: 'p' },
+    ])
+    expect(edges.size).toBe(0)
+  })
 })
 
 describe('groupMysqlIndexes', () => {
@@ -214,6 +265,24 @@ describe('groupMysqlIndexes', () => {
   it('reports only single-column unique indexes as column uniqueness', () => {
     const facts = groupMysqlIndexes(rows)
     expect([...(facts.singleUnique.get('users') ?? [])].sort()).toEqual(['email', 'id'])
+  })
+
+  it('orders parts by a fallback position when SEQ_IN_INDEX is missing', () => {
+    const facts = groupMysqlIndexes([
+      { TABLE_NAME: 't', INDEX_NAME: 'idx', NON_UNIQUE: 1, COLUMN_NAME: 'b' },
+      { TABLE_NAME: 't', INDEX_NAME: 'idx', NON_UNIQUE: 1, COLUMN_NAME: 'a' },
+    ])
+    expect(facts.edges.get('t')?.[0]).toMatchObject({ name: 'idx', columns: ['b', 'a'] })
+  })
+
+  it('drops a row the driver returned without a table or index name', () => {
+    const facts = groupMysqlIndexes([
+      { INDEX_NAME: 'orphan', NON_UNIQUE: 1, COLUMN_NAME: 'a' },
+      { TABLE_NAME: 't', NON_UNIQUE: 1, COLUMN_NAME: 'a' },
+      { TABLE_NAME: 't', INDEX_NAME: 'idx', NON_UNIQUE: 1, COLUMN_NAME: 'a' },
+    ])
+    expect([...facts.edges.keys()]).toEqual(['t'])
+    expect(facts.edges.get('t')?.map(edge => edge.name)).toEqual(['idx'])
   })
 })
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
 import Dbgraph, {
   DbgraphError,
+  DEFAULT_INDEX_STALE_HOURS,
   HARD_MAX_ROWS,
   clampLimit,
   qualifiedName,
@@ -12,7 +13,9 @@ import type {
   ColumnsResult,
   DatabaseDialect,
   DbgraphStore,
+  DialectInput,
   DialectProbe,
+  Engine,
   FindRequest,
   ImpactResult,
   IndexReport,
@@ -350,5 +353,226 @@ describe('dbgraph helpers', () => {
     expect(clampLimit(0, fallback)).toBe(50)
     expect(clampLimit(Number.NaN, fallback)).toBe(50)
     expect(clampLimit(10_000, fallback)).toBe(HARD_MAX_ROWS)
+  })
+})
+
+/** A connection carrying every optional field, so one call reaches each conditional spread. */
+const RICH_CONNECTION: StoredConnection = {
+  id: 'rich',
+  engine: 'mysql',
+  label: '丰富连接',
+  host: 'db.example',
+  port: 3307,
+  database: 'shop',
+  user: 'reader',
+  credentialRef: 'DBGRAPH_RICH_PASSWORD',
+  sensitiveColumns: 'show',
+  sensitivePatterns: ['session'],
+}
+
+/** A dialect that keeps the input it was handed, so a test can assert what crossed the seam. */
+function capturingDialect(captured: DialectInput[]): DatabaseDialect {
+  const base = stubDialect({ queries: [], inputs: [] })
+  return {
+    ...base,
+    fetchL1: input => {
+      captured.push(input)
+      return base.fetchL1(input)
+    },
+    execute: (input, query, limits, parameters) => {
+      captured.push(input)
+      return base.execute(input, query, limits, parameters)
+    },
+  }
+}
+
+describe('dbgraph seam edges', () => {
+  it('reports the configured index staleness window, and the default when unset', async () => {
+    const configured = new Context()
+    await configured.plugin(Dbgraph, { indexStaleHours: 2 })
+    expect(configured.dbgraph.indexStaleHours).toBe(2)
+
+    const bare = new Context()
+    await bare.plugin(Dbgraph)
+    expect(bare.dbgraph.indexStaleHours).toBe(DEFAULT_INDEX_STALE_HOURS)
+  })
+
+  it('rejects a dialect whose engine is outside the known set', async () => {
+    const ctx = new Context()
+    await ctx.plugin(Dbgraph)
+    const unknown = { ...stubDialect({ queries: [], inputs: [] }), engine: 'oracle' as Engine }
+    expect(() => ctx.dbgraph.registerDialect(unknown)).toThrowError(/"oracle" is not a known database engine/)
+    expect(() => ctx.dbgraph.registerDialect(unknown)).toThrowError(DbgraphError)
+  })
+
+  it('serves impact from the store, and refuses a call whose signal is already aborted', async () => {
+    const ctx = await seam()
+    await expect(ctx.dbgraph.impact({ connection: 'prod', object: 'sys_user' }))
+      .resolves.toMatchObject({ object: 'sys_user', entries: [] })
+
+    const controller = new AbortController()
+    controller.abort()
+    await expect(ctx.dbgraph.impact({ connection: 'prod', object: 'sys_user' }, controller.signal))
+      .rejects.toMatchObject({ code: 'DBGRAPH_ABORTED' })
+  })
+
+  it('leaves the store slot alone when a duplicate registration is disposed after the first', async () => {
+    const ctx = new Context()
+    await ctx.plugin(Dbgraph)
+    const store = stubStore()
+    const first = ctx.dbgraph.registerStore(store)
+    const second = ctx.dbgraph.registerStore(store)
+    first()
+    // The slot is empty now, so the second disposer must not resurrect or clear anything.
+    second()
+    await expect(ctx.dbgraph.schema({ connection: 'prod' })).rejects.toMatchObject({ code: 'DBGRAPH_NO_STORE' })
+  })
+
+  it('omits a connection target the configuration does not record', async () => {
+    const ctx = new Context()
+    await ctx.plugin(Dbgraph)
+    ctx.dbgraph.registerStore({
+      ...stubStore(),
+      connections: () => Promise.resolve([{ id: 'plain', engine: 'mysql' }]),
+    })
+    const list = await ctx.dbgraph.listConnections()
+    expect(list[0]).toEqual({
+      id: 'plain',
+      engine: 'mysql',
+      credentialConfigured: false,
+      index: { objects: 0, columns: 0, stale: true },
+    })
+  })
+
+  it('reports an empty index row when the store unloads while the list is being built', async () => {
+    const ctx = new Context()
+    await ctx.plugin(Dbgraph)
+    let disposeStore: () => void = () => {}
+    disposeStore = ctx.dbgraph.registerStore({
+      ...stubStore(),
+      connections: () => {
+        disposeStore()
+        return Promise.resolve(CONNECTIONS)
+      },
+    })
+    const list = await ctx.dbgraph.listConnections()
+    expect(list[0]?.id).toBe('prod')
+    expect(list[0]?.index).toEqual({ objects: 0, columns: 0, stale: true })
+  })
+
+  it('selects every column and binds nothing when the resolver names no column or condition', async () => {
+    const recorded: Recorded = { queries: [], inputs: [] }
+    const ctx = new Context()
+    await ctx.plugin(Dbgraph)
+    ctx.dbgraph.registerDialect(stubDialect(recorded))
+    ctx.dbgraph.registerStore(stubStore({
+      resolution: {
+        status: 'resolved',
+        reason: 'matched sys_user by name',
+        confidence: 0.8,
+        resolved: { object: 'sys_user', kind: 'table', score: 0.8, columns: [] },
+      },
+    }))
+
+    const result = await ctx.dbgraph.find({ connection: 'prod', object: 'sys_user' })
+    expect(recorded.queries[0]).toBe('SELECT * FROM `sys_user` LIMIT 50')
+    expect(result.sql).toBe('SELECT * FROM `sys_user` LIMIT 50')
+  })
+
+  it('names "none" when no connection is configured but one is requested', async () => {
+    const ctx = new Context()
+    await ctx.plugin(Dbgraph)
+    ctx.dbgraph.registerDialect(stubDialect({ queries: [], inputs: [] }))
+    ctx.dbgraph.registerStore({ ...stubStore(), connections: () => Promise.resolve([]) })
+    await expect(ctx.dbgraph.sql({ connection: 'prod', query: 'SELECT 1' }))
+      .rejects.toThrowError(/no connection "prod" is configured \(known: none\)/)
+  })
+
+  it('refuses a connection id that could not name a directory', async () => {
+    const ctx = await seam()
+    await expect(ctx.dbgraph.sql({ connection: 'PROD!', query: 'SELECT 1' }))
+      .rejects.toThrowError(/"PROD!" is not a usable connection id/)
+  })
+
+  it('forwards every optional connection field, the password and a live signal', async () => {
+    const captured: DialectInput[] = []
+    const ctx = new Context()
+    await ctx.plugin(Dbgraph)
+    ctx.dbgraph.registerDialect(capturingDialect(captured))
+    ctx.dbgraph.registerStore({ ...stubStore(), connections: () => Promise.resolve([RICH_CONNECTION]) })
+    await ctx.plugin(FakeCredentials)
+    const credentials = ctx.get('credentials') as FakeCredentials
+    credentials.resolveImpl = () => Promise.resolve({ value: 's3cret', source: 'file' })
+    const signal = new AbortController().signal
+
+    await ctx.dbgraph.index({ connection: 'rich', mode: 'l1' }, signal)
+    await ctx.dbgraph.find({ connection: 'rich', object: 'sys_user' }, signal)
+    await ctx.dbgraph.sql({ connection: 'rich', query: 'SELECT 1' }, signal)
+
+    expect(captured).toHaveLength(3)
+    for (const input of captured) {
+      expect(input.connection).toEqual({
+        id: 'rich',
+        engine: 'mysql',
+        label: '丰富连接',
+        host: 'db.example',
+        port: 3307,
+        database: 'shop',
+        user: 'reader',
+        credentialRef: 'DBGRAPH_RICH_PASSWORD',
+        sensitiveColumns: 'show',
+        sensitivePatterns: ['session'],
+      })
+      expect(input.password).toBe('s3cret')
+      expect(input.signal).toBe(signal)
+    }
+  })
+
+  it('omits the target fields the configuration does not record', async () => {
+    const captured: DialectInput[] = []
+    const ctx = new Context()
+    await ctx.plugin(Dbgraph)
+    ctx.dbgraph.registerDialect(capturingDialect(captured))
+    ctx.dbgraph.registerStore({
+      ...stubStore(),
+      connections: () => Promise.resolve([{ id: 'bare', engine: 'mysql' }]),
+    })
+
+    await ctx.dbgraph.index({ connection: 'bare', mode: 'l1' })
+    await ctx.dbgraph.sql({ connection: 'bare', query: 'SELECT 1' })
+
+    expect(captured.map(input => input.connection)).toEqual([
+      { id: 'bare', engine: 'mysql' },
+      { id: 'bare', engine: 'mysql' },
+    ])
+    expect(captured.map(input => input.password)).toEqual([undefined, undefined])
+    expect(captured.map(input => input.signal)).toEqual([undefined, undefined])
+  })
+
+  it('records why enrichment failed whatever the dialect threw', async () => {
+    const thrown: readonly [unknown, string][] = [
+      ['comment column unavailable', 'comment column unavailable'],
+      [{ reason: 'no comment column' }, '{"reason":"no comment column"}'],
+      [undefined, 'unknown error'],
+    ]
+    for (const [error, message] of thrown) {
+      const ctx = new Context()
+      await ctx.plugin(Dbgraph)
+      const dialect = stubDialect({ queries: [], inputs: [] })
+      ctx.dbgraph.registerDialect({ ...dialect, fetchL2: () => Promise.reject(error) })
+      ctx.dbgraph.registerStore(stubStore())
+      const report = await ctx.dbgraph.index({ connection: 'prod', mode: 'full' })
+      expect(report.warnings.join('\n')).toContain(`enrichment failed, index stays at L1: ${message}`)
+    }
+  })
+
+  it('treats a context with no service lookup as having no credential seam', async () => {
+    // A composition whose context does not implement `get` is a host this seam must survive, not a
+    // crash: both the listing and the password lookup answer "no credential" instead.
+    const ctx = await seam()
+    Object.defineProperty(ctx, 'get', { value: undefined, configurable: true })
+
+    expect(await ctx.dbgraph.passwordOf(CONNECTIONS[0]!)).toBeUndefined()
+    expect((await ctx.dbgraph.listConnections())[0]?.credentialConfigured).toBe(false)
   })
 })

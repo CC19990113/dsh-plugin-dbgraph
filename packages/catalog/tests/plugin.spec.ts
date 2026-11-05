@@ -113,10 +113,14 @@ describe('catalog plugin', () => {
 describe('catalog invariant companion', () => {
   it('reserves its own package name with the invariant service', async () => {
     const registered: string[] = []
+    let installed = 0
     const ctx = {
       invariants: {
-        register(packageName: string, _install: () => void): () => void {
+        register(packageName: string, install: () => void): () => void {
           registered.push(packageName)
+          // The host invokes the installer; it must be a harmless no-op for this package.
+          install()
+          installed += 1
           return () => {}
         },
       },
@@ -127,5 +131,6 @@ describe('catalog invariant companion', () => {
     expect(invariant.name).toBe('dbgraph-catalog-invariant')
     expect(invariant.inject).toEqual(['invariants'])
     expect(registered).toEqual(['dsh-plugin-dbgraph-catalog'])
+    expect(installed).toBe(1)
   })
 })

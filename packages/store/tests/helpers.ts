@@ -5,11 +5,17 @@
  * @module dsh-plugin-dbgraph-store-tests/helpers
  */
 
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { ConnectionId, ZH_ALIASES } from 'dsh-plugin-dbgraph-service'
+import {
+  ConnectionId,
+  INDEX_META_KEYS,
+  INDEX_SCHEMA_DDL,
+  INDEX_SCHEMA_VERSION,
+  ZH_ALIASES,
+} from 'dsh-plugin-dbgraph-service'
 import type {
   AliasGroup,
   IndexReport,
@@ -194,4 +200,25 @@ export function hasStagingFile(root: string, id = 'shop'): boolean {
 /** Open a connection's index read-only, for row-level assertions. */
 export function openRawIndex(root: string, id = 'shop'): DatabaseSync {
   return new DatabaseSync(indexPath(id, root), { readOnly: true })
+}
+
+/**
+ * Create an index with the real table and column names but without the DDL's `NOT NULL` constraints,
+ * the way another tool's writer may have left it, plus the meta rows a reader needs.
+ *
+ * The returned handle is writable so a test can insert rows the writer would never produce.
+ */
+export function foreignIndex(root: string, meta: Record<string, string> = {}, id = 'shop'): DatabaseSync {
+  const path = indexPath(id, root)
+  mkdirSync(dirname(path), { recursive: true })
+  const db = new DatabaseSync(path)
+  // The writer never produces a dangling reference, but a foreign file may; the reader tolerates it.
+  db.exec('PRAGMA foreign_keys = OFF')
+  for (const statement of INDEX_SCHEMA_DDL) db.exec(statement.replace(/\s+NOT NULL/g, ''))
+  const insertMeta = db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)')
+  insertMeta.run(INDEX_META_KEYS.schemaVersion, String(INDEX_SCHEMA_VERSION))
+  insertMeta.run(INDEX_META_KEYS.engine, 'mysql')
+  insertMeta.run(INDEX_META_KEYS.database, 'shop')
+  for (const [key, value] of Object.entries(meta)) insertMeta.run(key, value)
+  return db
 }

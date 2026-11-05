@@ -104,6 +104,28 @@ describe('describeWriteChannel', () => {
     // A `--` inside a literal is not a comment: it must not swallow the real clause that follows.
     expect(describeWriteChannel("SELECT '--' INTO OUTFILE '/tmp/x'")).toContain('INTO OUTFILE')
   })
+
+  it('respects both spellings of an escaped quote inside a literal', () => {
+    // MySQL doubles a quote inside a string AND accepts a backslash escape; either must keep the
+    // scan inside the literal, so a `--` after it is not mistaken for a comment.
+    expect(describeWriteChannel("SELECT 'it''s' AS label")).toBeUndefined()
+    expect(describeWriteChannel("SELECT 'a\\'b' AS label")).toBeUndefined()
+    expect(describeWriteChannel("SELECT 'it''s -- harmless' AS label")).toBeUndefined()
+  })
+
+  it('does not treat a backslash inside a backtick identifier as an escape', () => {
+    // MySQL only recognizes the backslash escape in string literals, not in quoted identifiers.
+    expect(describeWriteChannel('SELECT `a\\b` FROM t')).toBeUndefined()
+    expect(describeWriteChannel('SELECT `a\\` -- not a comment')).toBeUndefined()
+  })
+
+  it('treats an unterminated quote as running to the end of the statement', () => {
+    expect(describeWriteChannel("SELECT 'unterminated")).toBeUndefined()
+  })
+
+  it('stops scanning at an unterminated block comment', () => {
+    expect(describeWriteChannel('SELECT 1 /* unterminated')).toBeUndefined()
+  })
 })
 
 describe('assertReadOnlyStatement', () => {
@@ -240,6 +262,10 @@ describe('toJsonSafe', () => {
     expect(toJsonSafe(new Uint8Array([255, 0]))).toBe('0xff00 (2 bytes)')
   })
 
+  it('stringifies a value no JSON branch recognizes', () => {
+    expect(toJsonSafe(Symbol('tag'))).toBe('Symbol(tag)')
+  })
+
   it('recurses into arrays and plain objects', () => {
     expect(toJsonSafe({
       list: [1, undefined, new Date(0)],
@@ -308,6 +334,8 @@ describe('asString / asFiniteNumber', () => {
     expect(asFiniteNumber(7)).toBe(7)
     expect(asFiniteNumber('7')).toBe(7)
     expect(asFiniteNumber(7n)).toBe(7)
+    // A bigint too large for a finite double converts to Infinity, which is not a usable count.
+    expect(asFiniteNumber(2n ** 1024n)).toBeUndefined()
     expect(asFiniteNumber('   ')).toBeUndefined()
     expect(asFiniteNumber('abc')).toBeUndefined()
     expect(asFiniteNumber(Number.NaN)).toBeUndefined()

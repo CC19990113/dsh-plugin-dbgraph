@@ -8,13 +8,15 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { DEFAULT_STATUS_DIGEST_OBJECTS } from 'dsh-plugin-dbgraph-service'
 
 import { statusPath } from '../src/paths.ts'
-import { readStatusFile } from '../src/status.ts'
+import { buildStatusEntry, readStatusFile } from '../src/status.ts'
 import {
   SAMPLE,
   SQLITE_SAMPLE,
+  column,
   makeRoot,
   removeRoot,
   seed,
+  table,
 } from './helpers.ts'
 
 const roots: string[] = []
@@ -112,5 +114,80 @@ describe('status sidecar', () => {
     const file = readStatusFile(root)
     expect(file?.version).toBe(1)
     expect(Object.keys(file?.connections ?? {})).toEqual(['shop'])
+  })
+})
+
+describe('buildStatusEntry', () => {
+  it('applies the default digest cap and reports an uncommented, empty snapshot', () => {
+    const entry = buildStatusEntry({
+      engine: 'mysql',
+      level: 'l1',
+      fetchedAt: 42,
+      objects: [],
+      columnCount: 0,
+    })
+    expect(entry).toEqual({
+      engine: 'mysql',
+      l1IndexedAt: 42,
+      objects: 0,
+      columns: 0,
+      commentCoverage: 0,
+      digest: [],
+      digestOmitted: 0,
+    })
+    expect(DEFAULT_STATUS_DIGEST_OBJECTS).toBe(120)
+  })
+
+  it('carries a configured label and ranks equally wide objects by name', () => {
+    const narrowA = table('alpha', [column('id', 1, 'int')], { comment: 'A' })
+    const narrowB = table('beta', [column('id', 1, 'int')])
+    const entry = buildStatusEntry({
+      engine: 'mysql',
+      label: '生产',
+      level: 'l2',
+      fetchedAt: 7,
+      objects: [narrowB, narrowA],
+      columnCount: 2,
+      maxDigestObjects: 5,
+    })
+    expect(entry.label).toBe('生产')
+    expect(entry.l2IndexedAt).toBe(7)
+    // Same column count: the width tie-break cannot separate them, so the name decides.
+    expect(entry.digest.map(entry => entry.object)).toEqual(['alpha', 'beta'])
+    expect(entry.digest[0]).toEqual({ object: 'alpha', comment: 'A', columns: 1 })
+  })
+})
+
+describe('readStatusFile validation', () => {
+  function withDocument(document: string): string {
+    const root = makeRoot()
+    roots.push(root)
+    writeFileSync(statusPath(root), document, 'utf8')
+    return root
+  }
+
+  it('treats a non-object document as absent', () => {
+    expect(readStatusFile(withDocument('null'))).toBeUndefined()
+    expect(readStatusFile(withDocument('42'))).toBeUndefined()
+    expect(readStatusFile(withDocument('"status"'))).toBeUndefined()
+  })
+
+  it('treats a missing or non-numeric version as absent', () => {
+    expect(readStatusFile(withDocument(JSON.stringify({ connections: {} })))).toBeUndefined()
+    expect(readStatusFile(withDocument(JSON.stringify({ version: '1', connections: {} })))).toBeUndefined()
+  })
+
+  it('treats a missing or non-object connection map as absent', () => {
+    expect(readStatusFile(withDocument(JSON.stringify({ version: 1 })))).toBeUndefined()
+    expect(readStatusFile(withDocument(JSON.stringify({ version: 1, connections: null })))).toBeUndefined()
+  })
+
+  it('defaults a missing updatedAt to zero and keeps the entries it can read', () => {
+    const root = withDocument(JSON.stringify({ version: 1, connections: { shop: { engine: 'mysql' } } }))
+    expect(readStatusFile(root)).toEqual({
+      version: 1,
+      updatedAt: 0,
+      connections: { shop: { engine: 'mysql' } },
+    })
   })
 })

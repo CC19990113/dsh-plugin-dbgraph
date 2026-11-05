@@ -49,6 +49,7 @@ import type {
   WriteOptions,
 } from 'dsh-plugin-dbgraph-service'
 import { findConnection, readConnections, writeConnections } from './connections.ts'
+import { messageOf } from './message.ts'
 import { DEFAULT_READER_CONFIG, IndexReader } from './reader.ts'
 import type { ReaderConfig } from './reader.ts'
 import { buildStatusEntry, writeStatusEntry } from './status.ts'
@@ -128,17 +129,6 @@ export interface Config {
   readonly impactDepth?: number
   /** Edges one `impact` or `refs` call may return. Default 200. */
   readonly maxRelations?: number
-}
-
-/**
- * One thrown value's message.
- * @param error - the thrown value.
- * @returns a non-empty message.
- */
-function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string') return error
-  return JSON.stringify(error) ?? 'unknown error'
 }
 
 /** Whether the automatic writer selection has already explained itself. One line per process. */

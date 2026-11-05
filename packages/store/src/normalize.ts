@@ -138,9 +138,10 @@ export function levenshteinWithin(left: string, right: string, max: number): num
   const a = left.length > MAX_FUZZY_LENGTH ? left.slice(0, MAX_FUZZY_LENGTH) : left
   const b = right.length > MAX_FUZZY_LENGTH ? right.slice(0, MAX_FUZZY_LENGTH) : right
   if (a === b) return 0
+  // The length guard above already proves the answer for an empty side is within the bound.
   if (Math.abs(a.length - b.length) > max) return max + 1
-  if (a === '') return b.length <= max ? b.length : max + 1
-  if (b === '') return a.length <= max ? a.length : max + 1
+  if (a === '') return b.length
+  if (b === '') return a.length
 
   let previous = new Array<number>(b.length + 1)
   let current = new Array<number>(b.length + 1)

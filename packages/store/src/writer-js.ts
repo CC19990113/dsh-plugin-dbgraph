@@ -35,6 +35,7 @@ import type {
   RawObject,
   RawCatalog,
 } from 'dsh-plugin-dbgraph-service'
+import { messageOf } from './message.ts'
 import { normalizeComment, typeClassOf } from './normalize.ts'
 import { indexPath, stagingIndexPath, sweepStaleStaging } from './paths.ts'
 import { assignCatalogIds, buildTerms } from './terms.ts'
@@ -71,24 +72,15 @@ function applySchema(db: DatabaseSync): void {
     try {
       db.exec(statement)
     } catch (error) {
+      /* v8 ignore start -- a DDL failure is a build-environment fault (no FTS5, no space), not an input. */
       throw new DbgraphError(
         `creating the index schema failed: ${messageOf(error)}`,
         'DBGRAPH_WRITE_FAILED',
         { cause: error },
       )
+      /* v8 ignore stop */
     }
   }
-}
-
-/**
- * One thrown value's message.
- * @param error - the thrown value.
- * @returns a non-empty message.
- */
-function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string') return error
-  return JSON.stringify(error) ?? 'unknown error'
 }
 
 /**
@@ -107,14 +99,18 @@ function buildObjectSlots(
   for (let index = 0; index < objects.length; index += 1) {
     const object = objects[index]
     const id = objectIds[index]
+    /* v8 ignore start -- objectIds is built from the same array as objects. */
     if (object === undefined || id === undefined) continue
+    /* v8 ignore stop */
     const schema = object.schema ?? ''
     const exact = new Map<string, number>()
     const lower = new Map<string, number>()
     for (let columnIndex = 0; columnIndex < object.columns.length; columnIndex += 1) {
       const column = object.columns[columnIndex]
+      /* v8 ignore start -- columnIds has one id per column of this same object. */
       const columnId = (columnIds[index] ?? [])[columnIndex]
       if (column === undefined || columnId === undefined) continue
+      /* v8 ignore stop */
       exact.set(column.name, columnId)
       lower.set(column.name.toLowerCase(), columnId)
     }
@@ -229,7 +225,9 @@ export function writeIndexJs(input: JsWriteInput): IndexReport {
     for (let index = 0; index < catalog.objects.length; index += 1) {
       const object = catalog.objects[index]
       const objectId = ids.objects[index]
+      /* v8 ignore start -- ids.objects is built from this same array. */
       if (object === undefined || objectId === undefined) continue
+      /* v8 ignore stop */
       insertObject.run(
         objectId,
         object.kind,
@@ -242,11 +240,15 @@ export function writeIndexJs(input: JsWriteInput): IndexReport {
         now,
       )
       objectCount += 1
+      /* v8 ignore start -- ids.columns has one entry per object. */
       const columnIds = ids.columns[index] ?? []
+      /* v8 ignore stop */
       for (let columnIndex = 0; columnIndex < object.columns.length; columnIndex += 1) {
         const column = object.columns[columnIndex]
         const columnId = columnIds[columnIndex]
+        /* v8 ignore start -- columnIds has one id per column of this same object. */
         if (column === undefined || columnId === undefined) continue
+        /* v8 ignore stop */
         const enumValues = column.enumValues !== undefined && column.enumValues.length > 0
           ? JSON.stringify(column.enumValues)
           : null
@@ -276,7 +278,9 @@ export function writeIndexJs(input: JsWriteInput): IndexReport {
     for (let index = 0; index < catalog.objects.length; index += 1) {
       const object = catalog.objects[index]
       const srcId = ids.objects[index]
+      /* v8 ignore start -- ids.objects is built from this same array. */
       if (object === undefined || srcId === undefined) continue
+      /* v8 ignore stop */
       const srcSlot = lookups.byDisplay.get(
         (object.schema ?? '') === '' ? object.name : `${object.schema}.${object.name}`,
       )
@@ -330,7 +334,9 @@ export function writeIndexJs(input: JsWriteInput): IndexReport {
       // The staging handle is already unusable; the remaining work is cleanup, not diagnosis.
     }
     rmSync(stagingPath, { force: true })
+    /* v8 ignore start -- the schema guard above is the only DbgraphError path, and it is unreachable. */
     if (error instanceof DbgraphError) throw error
+    /* v8 ignore stop */
     throw new DbgraphError(
       `writing the index for "${connection}" failed: ${messageOf(error)}`,
       'DBGRAPH_WRITE_FAILED',

@@ -298,6 +298,38 @@ describe('replacement', () => {
   })
 })
 
+describe('relation walk bounds', () => {
+  it('reports truncation when the edge budget is exhausted', async () => {
+    const root = await freshRoot()
+    const { store } = await seed(root, 'shop', SAMPLE, { maxRelations: 1 })
+    stores.push(store)
+    const impact = await store.impact({ connection: 'shop', object: 'sys_user' })
+    expect(impact.truncated).toBe(true)
+    expect(impact.entries).toHaveLength(1)
+  })
+
+  it('does not report a self-reference twice', async () => {
+    const root = await freshRoot()
+    const tree: RawCatalog = {
+      engine: 'mysql',
+      database: 'shop',
+      fetchedAt: Date.now(),
+      level: 'l2',
+      objects: [
+        table('node', [column('id', 1, 'int', { isPrimaryKey: true }), column('parent_id', 2, 'int')], {
+          edges: [{ kind: 'fk', columns: ['parent_id'], refObject: 'node', refColumns: ['id'] }],
+        }),
+      ],
+    }
+    const { store } = await seed(root, 'shop', tree)
+    stores.push(store)
+    // The self-reference is the only inbound edge, so the walk sees an already-visited source.
+    const impact = await store.impact({ connection: 'shop', object: 'node' })
+    expect(impact.entries.map(entry => entry.object)).toEqual(['node'])
+    expect(impact.truncated).toBe(false)
+  })
+})
+
 describe('a corrupt search index', () => {
   it('fails a free-text listing instead of pretending there are no hits', async () => {
     const root = await freshRoot()

@@ -284,6 +284,22 @@ async function mount(options: {
   return { ctx, stub }
 }
 
+/**
+ * The same seam, but reporting an index root the way a mounted store does.
+ *
+ * `storeRoot` is a `Dbgraph` accessor rather than part of the `DbgraphService` interface this file
+ * stubs, so it is attached here and the value read through that same runtime shape.
+ * @param base - the stub seam.
+ * @param root - the absolute index root to report.
+ * @returns the stub seam, now naming a root.
+ */
+function withStoreRoot(base: SeamStub, root: string): SeamStub {
+  return {
+    seen: base.seen,
+    service: { ...base.service, storeRoot: root } as unknown as DbgraphService,
+  }
+}
+
 let callCounter = 0
 
 /** Execute one tool through the registry, the way the agent loop does. */
@@ -346,6 +362,30 @@ describe('plugin wiring', () => {
     expect(section?.text).toContain('用 dbgraph 回答数据库结构')
     expect(section?.text).toContain('[dbgraph] prod (mysql, 索引 1 分钟前, 2 表 / 9 列, 注释覆盖 50%)')
     expect(section?.text).toContain('sys_user 系统用户(4)')
+  })
+
+  it('reads the digest from the index root the store reports, not the ambient one', async () => {
+    // No DSH_DBGRAPH_ROOT: the digest must describe the directory the index actually lives in, which
+    // is the store's, so a composition that mounted a store never gets a summary of some other tree.
+    const now = Date.now()
+    const root = await rootWith({
+      'status.json': JSON.stringify({
+        version: 1,
+        updatedAt: now,
+        connections: {
+          prod: {
+            engine: 'mysql', l1IndexedAt: now - 60_000, l2IndexedAt: now - 60_000,
+            objects: 2, columns: 9, commentCoverage: 0.5,
+            digest: [{ object: 'store_owned', comment: '库自己的表', columns: 3 }], digestOmitted: 0,
+          },
+        },
+      }),
+    })
+    delete process.env['DSH_DBGRAPH_ROOT']
+    const { ctx } = await mount({ seamValue: withStoreRoot(seam(), root) })
+    const assembly = await ctx.systemPrompt.assemble()
+    const section = assembly.sections.find(entry => entry.name === 'tool:dbgraph')
+    expect(section?.text).toContain('store_owned 库自己的表(3)')
   })
 
   it('keeps the digest section off when a deployment disables it, but not the tools', async () => {
@@ -969,10 +1009,42 @@ describe('dbgraph_index', () => {
   })
 
   it('stays synchronous when no summary has ever been written', async () => {
+    // Pinned to an empty root: an ambient `~/.dsh/dbgraph/status.json` would otherwise answer this
+    // question from the developer's own machine instead of from "never written".
+    process.env['DSH_DBGRAPH_ROOT'] = await tempRoot()
     const jobs = fakeJobs()
     const { ctx } = await mount({ jobs: jobs.registry })
     await call(ctx, 'dbgraph_index', { connection: 'prod' }, { agent: true })
     expect(jobs.started).toEqual([])
+  })
+
+  it('stays synchronous when the store names a root with no summary yet', async () => {
+    // The same decision, but through the store's root: a freshly mounted store has no sidecar, so the
+    // absence must be answered from that directory rather than from the environment fallback.
+    const root = await tempRoot()
+    const jobs = fakeJobs()
+    const { ctx, stub } = await mount({ jobs: jobs.registry, seamValue: withStoreRoot(seam(), root) })
+    const result = await call(ctx, 'dbgraph_index', { connection: 'prod' }, { agent: true })
+    expect(jobs.started).toEqual([])
+    expect(textOf(result)).toContain('Indexed prod')
+    expect(stub.seen).toEqual([{ method: 'index', request: { mode: 'full', connection: 'prod' } }])
+  })
+
+  it('starts a job from the summary in the store root when that connection is large', async () => {
+    const root = await rootWith({
+      'status.json': JSON.stringify({
+        version: 1,
+        updatedAt: NOW,
+        connections: {
+          prod: { engine: 'mysql', objects: 600, columns: 9000, commentCoverage: 0, digest: [], digestOmitted: 0 },
+        },
+      }),
+    })
+    const jobs = fakeJobs()
+    const { ctx } = await mount({ jobs: jobs.registry, seamValue: withStoreRoot(seam(), root) })
+    const result = await call(ctx, 'dbgraph_index', { connection: 'prod' }, { agent: true })
+    expect(jobs.started).toHaveLength(1)
+    expect(textOf(result)).toContain('job job-1')
   })
 
   it('stays synchronous when the host has no job registry', async () => {

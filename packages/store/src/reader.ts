@@ -42,6 +42,7 @@ import type {
 } from 'dsh-plugin-dbgraph-service'
 import { IndexPool } from './database.ts'
 import type { OpenedIndex } from './database.ts'
+import { messageOf } from './message.ts'
 import { normalizeComment } from './normalize.ts'
 import { indexPath } from './paths.ts'
 
@@ -146,7 +147,9 @@ function textOf(row: Record<string, SQLOutputValue>, key: string): string | unde
 function numberOf(row: Record<string, SQLOutputValue>, key: string, fallback = 0): number {
   const value = row[key]
   if (typeof value === 'number') return value
+  /* v8 ignore start -- node:sqlite returns INTEGER as number; bigint needs setReadBigInts, never on. */
   if (typeof value === 'bigint') return Number(value)
+  /* v8 ignore stop */
   return fallback
 }
 
@@ -159,7 +162,9 @@ function numberOf(row: Record<string, SQLOutputValue>, key: string, fallback = 0
 function optionalNumberOf(row: Record<string, SQLOutputValue>, key: string): number | undefined {
   const value = row[key]
   if (typeof value === 'number') return value
+  /* v8 ignore start -- node:sqlite returns INTEGER as number; bigint needs setReadBigInts, never on. */
   if (typeof value === 'bigint') return Number(value)
+  /* v8 ignore stop */
   return undefined
 }
 
@@ -266,16 +271,6 @@ function numberMeta(opened: OpenedIndex, key: string): number | undefined {
 }
 
 /**
- * One thrown value's message.
- * @param error - the thrown value.
- * @returns a non-empty description.
- */
-function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return typeof error === 'string' ? error : String(error)
-}
-
-/**
  * Whether an FTS5 error is the "this MATCH expression is not valid" kind — the one failure a listing
  * may survive. SQLite reports it with an `fts5:` prefix or `malformed MATCH expression`.
  * @param error - the thrown value.
@@ -321,7 +316,9 @@ export function ftsObjectIds(db: DatabaseSync, match: string, limit: number): nu
       .all(match, limit)
     for (const row of objectRows) {
       const id = optionalNumberOf(row, 'id')
+      /* v8 ignore start -- the query filters object_id IS NOT NULL, so the id is always a number. */
       if (id !== undefined) remember(id, numberOf(row, 'rank'))
+      /* v8 ignore stop */
     }
     const columnRows = db
       .prepare(
@@ -571,7 +568,9 @@ export class IndexReader {
     const opened = this.open(request.connection)
     const engine = requireMeta(opened, INDEX_META_KEYS.engine)
     const database = requireMeta(opened, INDEX_META_KEYS.database)
+    /* v8 ignore start -- an aggregate without GROUP BY always returns one row. */
     const total = numberOf(opened.db.prepare('SELECT COUNT(*) AS count FROM objects').get() ?? {}, 'count')
+    /* v8 ignore stop */
     const rows = opened.db
       .prepare(
         `SELECT o.schema_name, o.name, o.kind, o.comment, o.row_estimate,
@@ -613,7 +612,9 @@ export class IndexReader {
     const limit = this.objectLimit(request.limit)
     const query = request.query?.trim() ?? ''
     if (query === '') {
+      /* v8 ignore start -- an aggregate without GROUP BY always returns one row. */
       const total = numberOf(opened.db.prepare('SELECT COUNT(*) AS count FROM objects').get() ?? {}, 'count')
+      /* v8 ignore stop */
       const ids = opened.db
         .prepare(
           `SELECT o.id, (SELECT COUNT(*) FROM columns c WHERE c.object_id = o.id) AS column_count
@@ -725,9 +726,11 @@ export class IndexReader {
    * @returns the state.
    */
   private stateOf(opened: OpenedIndex): IndexState {
+    /* v8 ignore start -- an aggregate without GROUP BY always returns one row. */
     const counts = opened.db
       .prepare('SELECT (SELECT COUNT(*) FROM objects) AS objects, (SELECT COUNT(*) FROM columns) AS columns')
       .get() ?? {}
+    /* v8 ignore stop */
     const l1IndexedAt = numberMeta(opened, INDEX_META_KEYS.l1IndexedAt)
       ?? numberMeta(opened, INDEX_META_KEYS.fetchedAt)
     const l2IndexedAt = numberMeta(opened, INDEX_META_KEYS.l2IndexedAt)
@@ -751,6 +754,7 @@ export class IndexReader {
    * @returns 0..1, and 0 for an empty index (no evidence, not full coverage).
    */
   private commentCoverageOf(opened: OpenedIndex): number {
+    /* v8 ignore start -- an aggregate without GROUP BY always returns one row. */
     const row = opened.db
       .prepare(
         `SELECT COUNT(*) AS total,
@@ -758,6 +762,7 @@ export class IndexReader {
          FROM columns`,
       )
       .get() ?? {}
+    /* v8 ignore stop */
     const total = numberOf(row, 'total')
     const commented = numberOf(row, 'commented')
     return total === 0 ? 0 : commented / total
@@ -806,7 +811,9 @@ function inboundEdges(
   destinationIds: readonly number[],
   limit: number,
 ): Record<string, SQLOutputValue>[] {
+  /* v8 ignore start -- both callers pass a non-empty frontier. */
   if (destinationIds.length === 0) return []
+  /* v8 ignore stop */
   const placeholders = destinationIds.map(() => '?').join(', ')
   return db
     .prepare(

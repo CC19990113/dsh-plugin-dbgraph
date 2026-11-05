@@ -63,6 +63,9 @@ function splitIdentifier(word: string): string[] {
     }
     current += ch
   }
+  // The only caller flushes a run it has already proven non-empty, so `current` is never empty here;
+  // the guard exists so `splitIdentifier('')` cannot emit an empty part.
+  /* v8 ignore next */
   if (current !== '') parts.push(current)
   return parts.map(part => part.toLowerCase())
 }
@@ -76,7 +79,10 @@ function splitIdentifier(word: string): string[] {
  */
 function isBoundary(previous: string, ch: string, next: string): boolean {
   const chClass = classOf(ch)
-  const previousClass = classOf(previous === '' ? ' ' : previous)
+  // `previous` is never empty at a real call: `current !== ''` short-circuits index 0, so a run is
+  // always flushed with a character behind the one being placed. The alternative stays for the
+  // helper's documented contract, not for a path any input can take.
+  const previousClass = classOf(previous === '' ? /* v8 ignore next */ ' ' : previous)
   if (chClass !== previousClass) {
     if (chClass === 'digit') return true
     if (chClass === 'upper') return previousClass === 'lower' || previousClass === 'digit'

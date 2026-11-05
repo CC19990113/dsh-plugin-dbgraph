@@ -94,8 +94,9 @@ const STRINGISH_MYSQL_TYPES: ReadonlySet<string> = new Set([
  * @returns true for character, text, enum and set types.
  */
 export function isStringishMysqlType(columnType: string): boolean {
-  const base = columnType.toLowerCase().split('(')[0]?.trim() ?? ''
-  const word = base.split(/\s+/)[0] ?? ''
+  // `split` always returns at least one element, so the base word is never absent.
+  const base = columnType.toLowerCase().split('(')[0]!.trim()
+  const word = base.split(/\s+/)[0]!
   return STRINGISH_MYSQL_TYPES.has(word)
 }
 
@@ -299,7 +300,6 @@ export function groupMysqlIndexes(rows: readonly MysqlIndexRow[]): MysqlIndexFac
     const parts = [...group.parts].sort((left, right) => left.seq - right.seq)
     if (parts.some(part => part.column === undefined)) continue
     const columns = parts.map(part => part.column as string)
-    if (columns.length === 0) continue
     const list = edges.get(group.table) ?? []
     list.push({ kind: 'index', name: group.name, columns, unique: group.unique })
     edges.set(group.table, list)

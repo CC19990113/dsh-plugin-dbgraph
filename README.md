@@ -167,12 +167,50 @@ password is resolved through the host's `ctx.credentials` seam on each operation
 pnpm install
 pnpm run build          # tsc -b across the four TS packages
 pnpm test               # vitest run
-pnpm run test:coverage  # per-file 100% thresholds
+pnpm run test:coverage  # vitest run --coverage (report only — see Coverage below)
 pnpm run rust:build     # cargo build --release for crates/dbgraph-indexer
 ```
 
 Tests resolve to live `src/`, never to built `lib/` (`tsconfig.base.json`'s `paths` map is the
 facade), so a stale build can never load a second copy of a module singleton.
+
+### Coverage
+
+`test:coverage` enforces per-file 100% statements/branches/functions/lines: a new branch without a
+test fails CI rather than drifting quietly.
+
+The MySQL dialect reaches 100% *without* a live server, and that is not a technicality. The dialect
+takes its driver as a constructor argument (`createMysqlDialect(driver)`), so driver-contract tests
+cover the states a conforming server cannot produce on demand — an empty `SELECT VERSION()`, a table
+that reports no columns, a driver error partway through a catalog. `mysql.spec.ts` still runs against
+a real server whenever a DSN is set, and its job is to prove those stubs match mysql2's `QueryResult`
+shapes rather than an invented palette.
+
+### The MySQL suite needs a server
+
+`packages/catalog/tests/mysql.spec.ts` runs only when `DSH_DBGRAPH_TEST_MYSQL_DSN` is set, and skips
+itself otherwise — it never fakes a connection. Without a server the MySQL dialect drops to ~13% in
+the coverage report, which is why `.github/workflows/ci.yml` starts a throwaway `mysql:8` service and
+points the variable at it. Locally, the same thing by hand:
+
+```sh
+docker run -d --name dg-mysql -p 3306:3306 \
+  -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -e MYSQL_DATABASE=dbgraph_test mysql:8
+DSH_DBGRAPH_TEST_MYSQL_DSN=mysql://root@127.0.0.1:3306/dbgraph_test pnpm run test:coverage
+```
+
+### Releasing
+
+```sh
+pnpm run release:prepare 0.1.1
+git commit -am "chore(release): 0.1.1"
+git tag v0.1.1 && git push --tags   # publish.yml publishes the five packages
+pnpm run release:finish             # regenerate the lockfile, then re-run the version gate
+```
+
+`pnpm run check:versions` is that gate. This package has no native addons, so the addon checks it
+performs for the other two plugins have nothing to compare against here; the package versions, the
+lockfile and the root `private: true` rule still apply. Both `ci.yml` and `publish.yml` run it first.
 
 ## License
 
