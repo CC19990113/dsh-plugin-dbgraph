@@ -13,11 +13,12 @@ import {
 } from 'dsh-plugin-dbgraph-service'
 import type { RawCatalog } from 'dsh-plugin-dbgraph-service'
 import { createStore } from '../src/index.ts'
-import { indexPath, statusPath, tempIndexPath } from '../src/paths.ts'
+import { indexPath, statusPath } from '../src/paths.ts'
 import {
   SAMPLE,
   column,
   connectionId,
+  hasStagingFile,
   makeRoot,
   openRawIndex,
   removeRoot,
@@ -289,7 +290,7 @@ describe('JavaScript write path', () => {
     const first = await store.write(connectionId('shop'), SAMPLE, { writer: 'js', aliases: [] })
     expect(first.objects).toBe(SAMPLE.objects.length)
     expect(existsSync(indexPath('shop', root))).toBe(true)
-    expect(existsSync(tempIndexPath('shop', root))).toBe(false)
+    expect(hasStagingFile(root, 'shop')).toBe(false)
 
     const smaller: RawCatalog = {
       engine: 'mysql',

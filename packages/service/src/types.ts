@@ -159,7 +159,7 @@ export interface RawEdge {
 /** One raw object (table, view, collection, key pattern). */
 export interface RawObject {
   /** Node category. */
-  readonly kind: ObjectKind | string
+  readonly kind: ObjectKind
   /** Namespace the object lives in (schema, or absent when the engine has none). */
   readonly schema?: string
   /** Object name. */
@@ -441,8 +441,6 @@ export interface DbgraphService {
    * than the first of several runs.
    */
   indexMany(request: IndexRequest, signal?: AbortSignal): Promise<IndexReport[]>
-  /** Record an index written by an out-of-process run (a background job). */
-  recordIndex(report: IndexReport): Promise<void>
 }
 
 /** `schema` request. */
@@ -587,6 +585,11 @@ export interface IndexRequest {
 export interface DbgraphStore {
   /** Store identity, for diagnostics and conflict messages. */
   readonly id: string
+  /**
+   * Absolute directory this store keeps its files under, when it has one. Read by the tool so the
+   * prompt digest and the index resolve the same root instead of each deriving its own.
+   */
+  readonly root?: string
   /** The connections this store's configuration file lists. */
   connections(): Promise<readonly StoredConnection[]>
   /** State of one connection's index. */
@@ -605,11 +608,6 @@ export interface DbgraphStore {
   refs(request: RefsRequest): Promise<RefsResult>
   /** Write a snapshot. Replaces the connection's index atomically. */
   write(connection: ConnectionId, catalog: RawCatalog, options: WriteOptions): Promise<IndexReport>
-  /**
-   * Fold an out-of-process run's report into whatever this store keeps outside the index file (the
-   * prompt digest sidecar). Optional: a store with no sidecar has nothing to record.
-   */
-  record?(report: IndexReport): Promise<void>
 }
 
 /** What the store needs beyond the catalog itself. */

@@ -120,10 +120,14 @@ export function renderDbgraph(value: DbgraphToolValue): string {
       const lines = [`Connections${counted(value.connections.length, value.connections.length, false)}:`]
       for (const connection of value.connections) {
         const label = connection.label === undefined ? '' : ` "${connection.label}"`
-        const credential = connection.credential_configured ? 'credential configured' : 'credential missing'
+        // SQLite is a file, not a server: there is no account to authenticate with, so reporting a
+        // missing credential for it describes a requirement that does not exist.
+        const credential = connection.engine === 'sqlite'
+          ? ''
+          : `, ${connection.credential_configured ? 'credential configured' : 'credential missing'}`
         lines.push(
           `  ${connection.id}${label} (${connection.engine}) ${connectionTarget(connection)}`
-          + ` — ${describeIndexState(connection.index)}, ${credential}`,
+          + ` — ${describeIndexState(connection.index)}${credential}`,
         )
       }
       return lines.join('\n')

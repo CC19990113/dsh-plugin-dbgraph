@@ -195,6 +195,10 @@ export function apply(ctx: Context, config: Config = {}): void {
         maxPromptTables: resolved.maxPromptTables,
         maxPromptChars: resolved.maxPromptChars,
         staleHours: resolved.indexStaleHours,
+        // The store owns the index root; the environment variable is only the fallback for a
+        // composition that mounts the tool without a store. Deriving it here independently would let
+        // the digest describe a directory the index is not in.
+        ...ctx.dbgraph.storeRoot === undefined ? {} : { root: ctx.dbgraph.storeRoot },
       })].filter(part => part !== '').join('\n\n'),
     })
   }
@@ -628,7 +632,7 @@ function startBackgroundIndex(
   // `inject` would hide this entire tool family from a profile that runs no background jobs.
   const jobs = ctx.get('jobs') as BackgroundJobRegistry | undefined
   if (jobs === undefined) return undefined
-  if (!backgroundRunWanted(config, request)) return undefined
+  if (!backgroundRunWanted(config, request, ctx.dbgraph.storeRoot)) return undefined
   try {
     return jobs.start({
       // The registry keys a job by its owning *session id*, not the agent object: it resolves the
@@ -656,10 +660,10 @@ function startBackgroundIndex(
  * @param request - the seam request about to run.
  * @returns whether the caller should try to start a job.
  */
-function backgroundRunWanted(config: ResolvedConfig, request: IndexRequest): boolean {
+function backgroundRunWanted(config: ResolvedConfig, request: IndexRequest, root: string | undefined): boolean {
   if (config.backgroundIndex === false) return false
   if (config.backgroundIndex === true) return true
-  const status = readStatusFile()
+  const status = root === undefined ? readStatusFile() : readStatusFile(root)
   if (status === undefined) return false
   const target = request.connection
   const entries = target === undefined

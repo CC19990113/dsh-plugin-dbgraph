@@ -107,50 +107,6 @@ export function buildStatusEntry(input: StatusEntryInput): StatusConnectionEntry
   }
 }
 
-/** What {@link buildStatusEntryFromIndex} needs, read back out of an index file. */
-export interface StatusEntryFromIndexInput {
-  /** Database family from `meta.engine`. */
-  readonly engine: string
-  /** Human label from `connections.json`, when one is configured. */
-  readonly label?: string
-  /** `meta.level`. */
-  readonly level: string
-  /** `meta.l1_indexed_at`. */
-  readonly l1IndexedAt: number
-  /** `meta.l2_indexed_at`, absent on an L1-only file. */
-  readonly l2IndexedAt?: number
-  /** Object rows in the index. */
-  readonly objects: number
-  /** Column rows in the index. */
-  readonly columns: number
-  /** Fraction of columns carrying a comment, 0..1. */
-  readonly commentCoverage: number
-  /** Largest objects, already capped by the reader. */
-  readonly digest: readonly StatusDigestEntry[]
-  /** Objects left out of {@link digest}. */
-  readonly digestOmitted: number
-}
-
-/**
- * Build the sidecar entry for an index this process did not write (a background native run). The
- * counts come from the file, not from the report, so the digest can never disagree with the index.
- * @param input - facts read back out of the index.
- * @returns the entry to store under the connection id.
- */
-export function buildStatusEntryFromIndex(input: StatusEntryFromIndexInput): StatusConnectionEntry {
-  return {
-    engine: input.engine,
-    ...(input.label === undefined ? {} : { label: input.label }),
-    l1IndexedAt: input.l1IndexedAt,
-    ...(input.l2IndexedAt === undefined ? {} : { l2IndexedAt: input.l2IndexedAt }),
-    objects: input.objects,
-    columns: input.columns,
-    commentCoverage: input.commentCoverage,
-    digest: input.digest,
-    digestOmitted: input.digestOmitted,
-  }
-}
-
 /**
  * Read the sidecar.
  *

@@ -11,8 +11,9 @@
  *   is measured here precisely so that cost can be compared against the native kernel instead of
  *   argued about.
  *
- * The file is written to `index.db.tmp`, closed, and only then renamed over `index.db`. A run that
- * dies leaves the previous index untouched; a reader never observes a half-built one.
+ * The file is written to `<index>.<pid>-<nonce>.tmp`, closed, and only then renamed over `index.db`.
+ * The nonce keeps concurrent runs from sharing one staging file; a run that dies leaves the previous
+ * index untouched, and an abandoned staging file is swept by a later run once it is an hour old.
  * @module dsh-plugin-dbgraph-store/writer-js
  */
 
@@ -35,7 +36,7 @@ import type {
   RawCatalog,
 } from 'dsh-plugin-dbgraph-service'
 import { normalizeComment, typeClassOf } from './normalize.ts'
-import { indexPath, tempIndexPath } from './paths.ts'
+import { indexPath, stagingIndexPath, sweepStaleStaging } from './paths.ts'
 import { assignCatalogIds, buildTerms } from './terms.ts'
 
 /** What one JavaScript write needs. */
@@ -173,8 +174,10 @@ export function writeIndexJs(input: JsWriteInput): IndexReport {
   }
   const now = input.now ?? Date.now()
   const finalPath = indexPath(connection, input.root)
-  const stagingPath = tempIndexPath(connection, input.root)
+  const stagingPath = stagingIndexPath(connection, input.root)
   mkdirSync(dirname(finalPath), { recursive: true })
+  // A killed run leaves its per-run staging file behind; nothing would ever reuse that name.
+  sweepStaleStaging(finalPath)
   rmSync(stagingPath, { force: true })
 
   const catalog = input.catalog

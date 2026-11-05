@@ -11,9 +11,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createStore } from '../src/index.ts'
-import { indexPath, tempIndexPath } from '../src/paths.ts'
+import { indexPath } from '../src/paths.ts'
 import { ADDON_ENV, parseRustReport } from '../src/rust-engine.ts'
-import { SAMPLE, connectionId, makeRoot, removeRoot } from './helpers.ts'
+import { SAMPLE, connectionId, hasStagingFile, makeRoot, removeRoot } from './helpers.ts'
 
 const roots: string[] = []
 const stores: { dispose(): void }[] = []
@@ -53,7 +53,7 @@ describe('writer selection without the native kernel', () => {
       expect(errors).toHaveBeenCalledTimes(1)
       expect(String(errors.mock.calls[0]?.[0])).toContain('native index writer is unavailable')
       expect(existsSync(indexPath('shop', root))).toBe(true)
-      expect(existsSync(tempIndexPath('shop', root))).toBe(false)
+      expect(hasStagingFile(root, 'shop')).toBe(false)
     } finally {
       errors.mockRestore()
     }
@@ -67,7 +67,7 @@ describe('writer selection without the native kernel', () => {
       store.write(connectionId('shop'), SAMPLE, { writer: 'rust', aliases: [] }),
     ).rejects.toMatchObject({ code: 'DBGRAPH_UNAVAILABLE' })
     expect(existsSync(indexPath('shop', root))).toBe(false)
-    expect(existsSync(tempIndexPath('shop', root))).toBe(false)
+    expect(hasStagingFile(root, 'shop')).toBe(false)
   })
 
   it("'js' never consults the addon at all", async () => {

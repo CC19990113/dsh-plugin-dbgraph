@@ -91,7 +91,9 @@ describe('renderDbgraph', () => {
     expect(text).toContain('Connections (2):')
     expect(text).toContain('prod "生产库" (mysql) mysql.internal / shop')
     expect(text).toContain('312 表 / 6840 列')
-    expect(text).toContain('local (sqlite) /tmp/app.db — not indexed, credential missing')
+    // A local file has no account to authenticate with, so the credential state is not reported at all.
+    expect(text).toContain('local (sqlite) /tmp/app.db — not indexed')
+    expect(text).not.toContain('credential missing')
   })
 
   it('says a schema list is empty and how to build it', () => {

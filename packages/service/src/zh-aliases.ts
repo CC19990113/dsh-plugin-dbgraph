@@ -17,6 +17,7 @@
  * @module dsh-plugin-dbgraph-service/zh-aliases
  */
 
+import { tokenizeForSearch } from './tokenize.ts'
 import type { AliasGroup } from './types.ts'
 
 /**
@@ -147,18 +148,24 @@ export const ZH_ALIASES: readonly AliasGroup[] = [
 ]
 
 /**
- * Column-name fragments that mark a value as too sensitive to hand back verbatim. A match masks the
- * value as `[REDACTED]` and names the column in the result's `redacted` list.
+ * Column-name fragments long enough to match as substrings without redacting an unrelated word. A
+ * match masks the value as `[REDACTED]` and names the column in the result's `redacted` list.
  *
  * The reason this exists is not opinion: without it, one careless question puts a password hash — or
  * a password — into the transcript, and this harness persists transcripts (and indexes them).
  * `sensitiveColumns: 'show'` turns masking off for a connection that genuinely needs it.
+ *
+ * `secret` is deliberately absent: as a substring it redacts `secretary`, and SQL columns named
+ * `secretary` are real. It lives in {@link SENSITIVE_COLUMN_TOKENS} instead, where it matches whole
+ * tokens (`secret`, `secrets`, `client_secret`) and not `secretary`.
  */
 export const SENSITIVE_COLUMN_PATTERNS: readonly string[] = [
   'password',
   'passwd',
   'pwd',
-  'secret',
+  'passcode',
+  'passphrase',
+  'passhash',
   'salt',
   'token',
   'credential',
@@ -166,6 +173,7 @@ export const SENSITIVE_COLUMN_PATTERNS: readonly string[] = [
   'privatekey',
   'access_key',
   'accesskey',
+  'apikey',
   'id_card',
   'idcard',
   'id_number',
@@ -175,17 +183,62 @@ export const SENSITIVE_COLUMN_PATTERNS: readonly string[] = [
 ]
 
 /**
- * Whether a column name or comment looks sensitive. Matching is case-insensitive substring matching
- * after normalizing separators, so `pass_word`, `PASSWORD_HASH`, and `userPasswd` all hit.
+ * Short ASCII words that are sensitive only as a whole identifier token, matched with an optional
+ * trailing `s`.
+ *
+ * `pass` as a substring would redact `passenger` and `bypass`; as a token it covers `user_pass`,
+ * `pass_hash` and `PassCode` — the spellings the alias table already treats as "password", and
+ * therefore the ones a `find` can return. The trailing-`s` rule is what makes `secrets` match while
+ * keeping `secretary` and `passage` out: those are different tokens, not plural forms.
+ *
+ * `userpass` (the concatenated spelling) is a token of its own because `pass` is not: no separator
+ * splits it, and SQL columns are routinely named `userpass` by older frameworks.
+ */
+export const SENSITIVE_COLUMN_TOKENS: readonly string[] = ['pass', 'secret', 'userpass']
+
+/**
+ * Chinese words that mark a column as sensitive. CJK has no separators, so these match as substrings
+ * of the folded name — the same rule the alias table uses for `密码` inside `登录密码`.
+ */
+export const SENSITIVE_CJK_WORDS: readonly string[] = ['密码', '口令', '密钥', '凭证']
+
+/**
+ * The identifier tokens of a column name, as the shared tokenizer splits them (`user_pass` gives
+ * `user`, `pass`). CJK bigrams are dropped: a Chinese word is matched as a substring instead.
+ * @param name - the column name.
+ * @returns its ASCII tokens, lowercased.
+ */
+function identifierTokens(name: string): string[] {
+  return tokenizeForSearch(name).filter(token => /^[a-z0-9]+$/.test(token))
+}
+
+/**
+ * Whether a column name looks sensitive. Three rules, each for a different shape:
+ *
+ * - a Chinese word matches as a substring;
+ * - a long ASCII fragment (`password`, `idcard`) matches as a substring too — a false positive on
+ *   `password_reset_count` is cheaper than a missed `user_password`;
+ * - a short ambiguous word (`pass`, `secret`) matches only as a whole identifier token, with an
+ *   optional trailing `s`. So `passenger`, `bypass`, `compass` and `secretary` are not redacted,
+ *   while `user_pass`, `pass_hash`, `client_secret` and `secrets` are. The `s` matters because a
+ *   column named `secrets` is a plural of the same thing, whereas `secretary` merely shares a prefix.
+ *
  * @param name - column name.
- * @param extra - additional patterns from configuration.
+ * @param extra - additional patterns from configuration, matched with the substring rule.
  * @returns true when the column should be masked.
  */
 export function isSensitiveColumn(name: string, extra: readonly string[] = []): boolean {
   const normalized = name.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '')
   if (normalized === '') return false
+  for (const word of SENSITIVE_CJK_WORDS) {
+    if (normalized.includes(word)) return true
+  }
   for (const pattern of SENSITIVE_COLUMN_PATTERNS) {
     if (normalized.includes(pattern)) return true
+  }
+  const tokens = identifierTokens(name)
+  for (const word of SENSITIVE_COLUMN_TOKENS) {
+    if (tokens.includes(word) || tokens.includes(`${word}s`)) return true
   }
   for (const pattern of extra) {
     const needle = pattern.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '')

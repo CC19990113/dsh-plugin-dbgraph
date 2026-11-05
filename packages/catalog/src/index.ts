@@ -37,6 +37,7 @@ export {
   REDACTED_VALUE,
   assertReadOnlyStatement,
   clampRowLimit,
+  describeWriteChannel,
   firstStatementKeyword,
   isReadStatement,
   messageOf,

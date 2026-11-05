@@ -3,10 +3,10 @@
  * rule that an out-of-process run is recorded from the index itself.
  */
 
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DEFAULT_STATUS_DIGEST_OBJECTS } from 'dsh-plugin-dbgraph-service'
-import { createStore } from '../src/index.ts'
+
 import { statusPath } from '../src/paths.ts'
 import { readStatusFile } from '../src/status.ts'
 import {
@@ -112,48 +112,5 @@ describe('status sidecar', () => {
     const file = readStatusFile(root)
     expect(file?.version).toBe(1)
     expect(Object.keys(file?.connections ?? {})).toEqual(['shop'])
-  })
-})
-
-describe('record', () => {
-  it('rebuilds the entry from the index file for an out-of-process run', async () => {
-    const root = await freshRoot()
-    const { store, report } = await seed(root, 'shop', SAMPLE)
-    stores.push(store)
-    rmSync(statusPath(root), { force: true })
-    expect(existsSync(statusPath(root))).toBe(false)
-    await store.record({ ...report, writer: 'rust', elapsedMs: 1 })
-    const entry = readStatusFile(root)?.connections.shop
-    expect(entry).toMatchObject({
-      engine: 'mysql',
-      objects: SAMPLE.objects.length,
-      columns: 331,
-      l1IndexedAt: SAMPLE.fetchedAt,
-      l2IndexedAt: SAMPLE.fetchedAt,
-      digestOmitted: 0,
-    })
-    expect(entry?.digest).toHaveLength(SAMPLE.objects.length)
-    expect(entry?.commentCoverage).toBeCloseTo(17 / 331, 10)
-    // JSON on disk is the compact shape the prompt reader expects.
-    expect(readFileSync(statusPath(root), 'utf8').includes('"connections"')).toBe(true)
-  })
-
-  it('refuses to record for an index that is not there', async () => {
-    const root = await freshRoot()
-    const store = createStore({ root })
-    stores.push(store)
-    await expect(
-      store.record({
-        connection: 'ghost',
-        level: 'l1',
-        objects: 0,
-        columns: 0,
-        edges: 0,
-        terms: 0,
-        writer: 'rust',
-        elapsedMs: 0,
-        warnings: [],
-      }),
-    ).rejects.toMatchObject({ code: 'DBGRAPH_UNAVAILABLE' })
   })
 })

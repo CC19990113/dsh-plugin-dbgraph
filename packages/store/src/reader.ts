@@ -39,13 +39,11 @@ import type {
   RefsResult,
   SchemaRequest,
   SchemaResult,
-  StatusDigestEntry,
 } from 'dsh-plugin-dbgraph-service'
 import { IndexPool } from './database.ts'
 import type { OpenedIndex } from './database.ts'
 import { normalizeComment } from './normalize.ts'
 import { indexPath } from './paths.ts'
-import type { StatusEntryFromIndexInput } from './status.ts'
 
 /** One row of `objects`, as every read operation wants it. */
 export interface ObjectRecord {
@@ -268,6 +266,26 @@ function numberMeta(opened: OpenedIndex, key: string): number | undefined {
 }
 
 /**
+ * One thrown value's message.
+ * @param error - the thrown value.
+ * @returns a non-empty description.
+ */
+function messageOf(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return typeof error === 'string' ? error : String(error)
+}
+
+/**
+ * Whether an FTS5 error is the "this MATCH expression is not valid" kind — the one failure a listing
+ * may survive. SQLite reports it with an `fts5:` prefix or `malformed MATCH expression`.
+ * @param error - the thrown value.
+ * @returns true when the expression, not the index, is at fault.
+ */
+function isMatchSyntaxError(error: unknown): boolean {
+  return /fts5|malformed MATCH expression/i.test(messageOf(error))
+}
+
+/**
  * The FTS expression for free-text words, or undefined when the words hold no token.
  * @param words - the user's words.
  * @returns a `MATCH` expression or undefined.
@@ -316,8 +334,12 @@ export function ftsObjectIds(db: DatabaseSync, match: string, limit: number): nu
       const id = optionalNumberOf(row, 'id')
       if (id !== undefined) remember(id, numberOf(row, 'rank'))
     }
-  } catch {
-    // A malformed MATCH expression must not fail a listing; the caller falls back to LIKE.
+  } catch (error) {
+    // Only a rejected MATCH expression may fall back to LIKE: `searchMatchQuery` always quotes its
+    // tokens, so that case is a defect guard rather than a normal path. Anything else — a corrupt
+    // index, a missing table — is a real fault, and flattening it into "no hits" would hide it.
+    if (!isMatchSyntaxError(error)) throw error
+    console.error(`[dbgraph-store] the FTS index rejected the query (${messageOf(error)}); falling back to LIKE`)
     return []
   }
   return [...ranks.entries()]
@@ -687,54 +709,6 @@ export class IndexReader {
       object: displayName(lookup.record),
       entries: rows.slice(0, this.config.maxRelations).map(row => relationFromRow(row)),
       truncated: rows.length > this.config.maxRelations,
-    }
-  }
-
-  /**
-   * Read the facts a prompt-digest entry is rebuilt from, for an index this process did not write.
-   * @param connection - connection identity.
-   * @returns the entry's facts without the display label (the caller adds it).
-   */
-  summary(connection: string): StatusEntryFromIndexInput {
-    const opened = this.open(connection)
-    const engine = requireMeta(opened, INDEX_META_KEYS.engine)
-    const level = opened.meta.get(INDEX_META_KEYS.level) ?? 'l1'
-    const fetchedAt = numberMeta(opened, INDEX_META_KEYS.fetchedAt) ?? numberMeta(opened, INDEX_META_KEYS.l1IndexedAt)
-    if (fetchedAt === undefined) {
-      throw new DbgraphError('the index records no fetched_at snapshot time', 'DBGRAPH_MALFORMED_INDEX')
-    }
-    const l1IndexedAt = numberMeta(opened, INDEX_META_KEYS.l1IndexedAt) ?? fetchedAt
-    const l2IndexedAt = numberMeta(opened, INDEX_META_KEYS.l2IndexedAt)
-      ?? (level === 'l2' ? fetchedAt : undefined)
-    const objects = numberOf(opened.db.prepare('SELECT COUNT(*) AS count FROM objects').get() ?? {}, 'count')
-    const columns = numberOf(opened.db.prepare('SELECT COUNT(*) AS count FROM columns').get() ?? {}, 'count')
-    const digestRows = opened.db
-      .prepare(
-        `SELECT o.schema_name, o.name, o.comment,
-                (SELECT COUNT(*) FROM columns c WHERE c.object_id = o.id) AS column_count
-         FROM objects o ORDER BY column_count DESC, o.name ASC, o.id ASC LIMIT ?`,
-      )
-      .all(this.config.maxDigestObjects)
-    const digest: StatusDigestEntry[] = digestRows.map(row => {
-      const schema = textOf(row, 'schema_name') ?? ''
-      const name = textOf(row, 'name') ?? ''
-      const comment = normalizeComment(textOf(row, 'comment'))
-      return {
-        object: schema === '' ? name : `${schema}.${name}`,
-        ...(comment === undefined ? {} : { comment }),
-        columns: numberOf(row, 'column_count'),
-      }
-    })
-    return {
-      engine,
-      level,
-      l1IndexedAt,
-      ...(l2IndexedAt === undefined ? {} : { l2IndexedAt }),
-      objects,
-      columns,
-      commentCoverage: this.commentCoverageOf(opened),
-      digest,
-      digestOmitted: objects - digest.length,
     }
   }
 

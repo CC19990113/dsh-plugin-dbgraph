@@ -51,8 +51,8 @@ import type {
 import { findConnection, readConnections, writeConnections } from './connections.ts'
 import { DEFAULT_READER_CONFIG, IndexReader } from './reader.ts'
 import type { ReaderConfig } from './reader.ts'
-import { buildStatusEntry, buildStatusEntryFromIndex, writeStatusEntry } from './status.ts'
-import { indexPath, indexRoot, tempIndexPath } from './paths.ts'
+import { buildStatusEntry, writeStatusEntry } from './status.ts'
+import { indexPath, indexRoot, stagingIndexPath, sweepStaleStaging } from './paths.ts'
 import { DEFAULT_RESOLVE_OPTIONS, resolveFind } from './resolve.ts'
 import type { ResolveOptions } from './resolve.ts'
 import { writeIndexJs } from './writer-js.ts'
@@ -76,16 +76,18 @@ export { buildEntityConcepts, DEFAULT_RESOLVE_OPTIONS } from './resolve.ts'
 export type { ResolveOptions } from './resolve.ts'
 export {
   ROOT_ENV,
+  STALE_STAGING_MAX_AGE_MS,
   connectionDir,
   connectionsPath,
   indexRoot,
   indexPath,
   statusPath,
-  tempIndexPath,
+  stagingIndexPath,
+  sweepStaleStaging,
 } from './paths.ts'
 export { CONNECTIONS_FORMAT_VERSION, findConnection, readConnections, writeConnections } from './connections.ts'
 export { STATUS_FORMAT_VERSION, readStatusFile } from './status.ts'
-export type { StatusEntryFromIndexInput, StatusEntryInput } from './status.ts'
+export type { StatusEntryInput } from './status.ts'
 export { IndexReader, DEFAULT_READER_CONFIG } from './reader.ts'
 export type { ColumnRecord, ObjectLookup, ObjectRecord, ReaderConfig } from './reader.ts'
 export { IndexPool, openIndex } from './database.ts'
@@ -157,15 +159,63 @@ function reportAutoFallback(reason: string): void {
 }
 
 /**
+ * One in-flight writer per connection.
+ *
+ * The staging path is unique per run, so two runs can no longer share a file — what still collides is
+ * the live index and the digest that describes it. Each run renames its own complete file onto
+ * `<connection>/index.db` and then writes a `status.json` entry; interleaved, the surviving index
+ * could be run A's while the digest reports run B's counts and timestamps, and one of the two reports
+ * would describe a file it did not leave behind. A run holds its connection id for that whole
+ * rename-then-digest sequence, and a second one is refused with `DBGRAPH_CONFLICT` instead of racing.
+ */
+export class WriteGuard {
+  private readonly active = new Set<string>()
+
+  /**
+   * Whether a write for this connection is in flight.
+   * @param connection - connection identity.
+   * @returns true when a run holds it.
+   */
+  has(connection: string): boolean {
+    return this.active.has(connection)
+  }
+
+  /**
+   * Run `work` while holding the connection, releasing it on both outcomes.
+   * @param connection - connection identity.
+   * @param work - the write to run.
+   * @returns the write's result.
+   * @throws DbgraphError with `DBGRAPH_CONFLICT` when another write already holds the connection.
+   */
+  async run<T>(connection: string, work: () => Promise<T>): Promise<T> {
+    if (this.active.has(connection)) {
+      throw new DbgraphError(
+        `an index write for connection "${connection}" is already in progress; wait for it to finish`,
+        'DBGRAPH_CONFLICT',
+      )
+    }
+    this.active.add(connection)
+    try {
+      return await work()
+    } finally {
+      this.active.delete(connection)
+    }
+  }
+}
+
+/**
  * The store implementation: one reader (which owns the connection pool) plus the two files it manages.
  */
 export class DbgraphIndexStore implements DbgraphStore {
   /** Store identity, as the seam's conflict message renders it. */
   readonly id: string = DEFAULT_STORE_ID
 
-  private readonly root: string
+  /** Absolute directory this store keeps its files under (also read by the tool's prompt digest). */
+  readonly root: string
   private readonly aliases: readonly AliasGroup[]
   private readonly reader: IndexReader
+  /** One in-flight writer per connection; see {@link WriteGuard}. */
+  readonly writes = new WriteGuard()
   private readonly resolveOptions: ResolveOptions
   private readonly maxDigestObjects: number
 
@@ -299,6 +349,23 @@ export class DbgraphIndexStore implements DbgraphStore {
     if (!isValidConnectionId(connection)) {
       throw new DbgraphError(`"${connection}" is not a usable connection id`, 'DBGRAPH_UNKNOWN_CONNECTION')
     }
+    // One writer per connection: the staging file is per-run, but the live index and its digest are
+    // not, so the second run is refused rather than allowed to interleave its rename and status write.
+    return this.writes.run(connection, () => this.writeLocked(connection, catalog, options))
+  }
+
+  /**
+   * The write body, run while this connection's in-flight slot is held.
+   * @param connection - connection identity, already validated.
+   * @param catalog - the snapshot to write.
+   * @param options - writer preference and the alias table.
+   * @returns the run's report.
+   */
+  private async writeLocked(
+    connection: ConnectionIdType,
+    catalog: RawCatalog,
+    options: WriteOptions,
+  ): Promise<IndexReport> {
     const aliases = options.aliases.length === 0 ? this.aliases : options.aliases
     const startedAt = performance.now()
     let report: IndexReport
@@ -358,36 +425,6 @@ export class DbgraphIndexStore implements DbgraphStore {
   }
 
   /**
-   * Fold an out-of-process run into the prompt sidecar, reading the counts back out of the index so the
-   * digest cannot disagree with the file.
-   * @param report - the finished run's report.
-   * @returns nothing.
-   */
-  async record(report: IndexReport): Promise<void> {
-    if (!isValidConnectionId(report.connection)) {
-      throw new DbgraphError(`"${report.connection}" is not a usable connection id`, 'DBGRAPH_UNKNOWN_CONNECTION')
-    }
-    const summary = this.reader.summary(report.connection)
-    const label = this.labelOf(report.connection)
-    try {
-      writeStatusEntry(
-        this.root,
-        report.connection,
-        buildStatusEntryFromIndex({
-          ...summary,
-          ...(label === undefined ? {} : { label }),
-        }),
-      )
-    } catch (error) {
-      throw new DbgraphError(
-        `recording the prompt digest failed: ${messageOf(error)}`,
-        'DBGRAPH_WRITE_FAILED',
-        { cause: error },
-      )
-    }
-  }
-
-  /**
    * Write one index through the native kernel, then rename it into place.
    *
    * The addon owns exactly one file — the staging path — and deletes it on any failure. This method
@@ -408,8 +445,10 @@ export class DbgraphIndexStore implements DbgraphStore {
     startedAt: number,
   ): Promise<IndexReport> {
     const finalPath = indexPath(connection, this.root)
-    const stagingPath = tempIndexPath(connection, this.root)
+    const stagingPath = stagingIndexPath(connection, this.root)
     mkdirSync(dirname(finalPath), { recursive: true })
+    // Clean up staging files a previous run left behind (a killed build never returns to rename).
+    sweepStaleStaging(finalPath)
     rmSync(stagingPath, { force: true })
     let built: unknown
     try {

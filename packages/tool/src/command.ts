@@ -162,7 +162,7 @@ function connectionLine(connection: ConnectionSummary): string {
 
 /** Report every configured connection's index at a glance. */
 async function statusCommand(ctx: Context): Promise<CommandResult> {
-  const root = dbgraphRoot()
+  const root = ctx.dbgraph.storeRoot ?? dbgraphRoot()
   const connections = await ctx.dbgraph.listConnections()
   if (connections.length === 0) {
     return {

@@ -297,3 +297,16 @@ describe('replacement', () => {
     expect(() => openRawIndex(root).prepare('SELECT 1')).not.toThrow()
   })
 })
+
+describe('a corrupt search index', () => {
+  it('fails a free-text listing instead of pretending there are no hits', async () => {
+    const root = await freshRoot()
+    const { store } = await seed(root, 'shop', SAMPLE)
+    stores.push(store)
+    const database = new DatabaseSync(indexPath('shop', root))
+    database.exec('DROP TABLE search')
+    database.close()
+    // Falling back to LIKE here would report "nothing matched" for an index that is broken.
+    await expect(store.objects({ connection: 'shop', query: '用户' })).rejects.toThrow()
+  })
+})

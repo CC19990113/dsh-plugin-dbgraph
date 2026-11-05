@@ -290,7 +290,7 @@ pub fn normalize_identifier(name: &str) -> String {
         .collect::<String>()
         .to_lowercase()
         .chars()
-        .filter(|character| character.is_ascii_alphanumeric() || is_cjk(*character))
+        .filter(|character| character.is_alphanumeric())
         .collect()
 }
 
@@ -443,6 +443,15 @@ mod tests {
         assert_eq!(normalize_identifier("USER-ID"), "userid");
         assert_eq!(normalize_identifier("用户 ID"), "用户id");
         assert_eq!(normalize_identifier("、、"), "");
+    }
+
+    #[test]
+    fn folds_letters_that_are_neither_ascii_nor_cjk() {
+        // A Cyrillic or accented identifier must fold to itself; folding it to '' made it
+        // unmatchable and the resolver answered "no such column" about a column that exists.
+        assert_eq!(normalize_identifier("Имя"), "имя");
+        assert_eq!(normalize_identifier("имя_клиента"), "имяклиента");
+        assert_eq!(normalize_identifier("café"), "café");
     }
 
     #[test]

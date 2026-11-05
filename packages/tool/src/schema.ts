@@ -282,7 +282,7 @@ export const DBGRAPH_INDEX_PARAMETERS = {
   mode: {
     type: 'string',
     enum: [...DBGRAPH_INDEX_MODES],
-    description: 'How deep to build: l1 (structure only, fast), l2 (enrichment only, needs an L1 index), full (L1 then L2, the default).',
+    description: 'How deep to build: l1 (structure only, fast), full (L1 then L2 enrichment, the default), l2 (accepted as an alias of full: every non-l1 run re-reads L1 first).',
   },
   writer: {
     type: 'string',

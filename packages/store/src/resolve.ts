@@ -66,6 +66,15 @@ const AVAILABLE_COLUMNS_SHOWN = 40
 /** Columns summarised in a resolved reason. */
 const REASON_COLUMNS_SHOWN = 8
 
+/**
+ * Shortest folded field a fuzzy match may act on.
+ *
+ * At four or five characters one substitution is another plausible column (`c0520`/`c0020`,
+ * `flag`/`flat`), and answering with a column nobody asked for is the one failure the resolver must
+ * not produce — a miss is recoverable, a silent substitution is not.
+ */
+const FUZZY_MIN_LENGTH = 6
+
 /** How the resolver is tuned. */
 export interface ResolveOptions {
   /** Alias table expanded into the query and used by the synonym tier. */
@@ -391,21 +400,33 @@ function matchField(
     }
   }
 
-  // 5. within two edits of the column name or one of its name tokens.
-  let fuzzy: { column: ColumnRecord; distance: number } | undefined
-  for (const column of columns) {
-    const candidates = [normalizeIdentifier(column.name), ...tokenizeForSearch(column.name).map(normalizeIdentifier)]
-    for (const candidate of candidates) {
-      if (candidate === '') continue
-      const distance = levenshteinWithin(folded, candidate, 2)
-      if (distance <= 2 && (fuzzy === undefined || distance < fuzzy.distance)) {
-        fuzzy = { column, distance }
+  // 5. one edit away from a long-enough column name or name token, and the single best candidate.
+  //    A short identifier is excluded (see FUZZY_MIN_LENGTH) and a tie is refused: a substitution
+  //    that silently answers with another column is worse than saying the field is not there. The
+  //    floor applies to both sides: a 5-character column one edit away from a 6-character field is
+  //    exactly the kind of near-miss a loose floor would answer with.
+  if (folded.length >= FUZZY_MIN_LENGTH) {
+    let best: { column: ColumnRecord; distance: number } | undefined
+    let bestCount = 0
+    for (const column of columns) {
+      const candidates = [normalizeIdentifier(column.name), ...tokenizeForSearch(column.name).map(normalizeIdentifier)]
+      let columnBest = Number.POSITIVE_INFINITY
+      for (const candidate of candidates) {
+        if (candidate.length < FUZZY_MIN_LENGTH) continue
+        const distance = levenshteinWithin(folded, candidate, 1)
+        if (distance <= 1 && distance < columnBest) columnBest = distance
+      }
+      if (columnBest === Number.POSITIVE_INFINITY) continue
+      if (best === undefined || columnBest < best.distance) {
+        best = { column, distance: columnBest }
+        bestCount = 1
+      } else if (columnBest === best.distance) {
+        bestCount += 1
       }
     }
-    if (fuzzy !== undefined && fuzzy.distance <= 1) break
-  }
-  if (fuzzy !== undefined) {
-    return columnMatch(fuzzy.column, 'fuzzy', fuzzy.distance === 1 ? 0.55 : 0.5, field)
+    if (best !== undefined && bestCount === 1) {
+      return columnMatch(best.column, 'fuzzy', 0.55, field)
+    }
   }
   return undefined
 }
@@ -529,7 +550,13 @@ function buildResolved(
   whereEntries: readonly (readonly [string, unknown])[],
   options: ResolveOptions,
 ): Resolution {
-  const columns = loadColumns(db, record.id, options.maxColumns + 1).slice(0, options.maxColumns)
+  const loaded = loadColumns(db, record.id, options.maxColumns + 1)
+  const columns = loaded.slice(0, options.maxColumns)
+  // Saying "no such column" about a column that exists but fell outside the cap would be a wrong
+  // answer, so the refusal names the bound whenever it applied.
+  const bound = loaded.length > options.maxColumns
+    ? `（只检查了前 ${options.maxColumns} 列，该表还有更多列未参与匹配）`
+    : ''
   const display = displayName(record)
   const where: { column: ColumnRecord; value: unknown }[] = []
   for (const [key, value] of whereEntries) {
@@ -537,7 +564,7 @@ function buildResolved(
     if (column === undefined) {
       return {
         status: 'not_found',
-        reason: `表 ${display} 没有字段“${key}”（where 条件用）；可用列：${availableColumnsText(columns)}。`,
+        reason: `表 ${display} 没有字段“${key}”（where 条件用）；可用列：${availableColumnsText(columns)}${bound}。`,
         confidence: 0,
         resolved: makeCandidate(record, confidence, []),
       }
@@ -554,7 +581,7 @@ function buildResolved(
       return {
         status: 'not_found',
         reason: `表 ${display} 没有字段${outcome.missing.map(word => `“${word}”`).join('、')}；`
-          + `可用列：${availableColumnsText(columns)}。`,
+          + `可用列：${availableColumnsText(columns)}${bound}。`,
         confidence: 0,
         resolved: makeCandidate(record, confidence, outcome.matches),
       }

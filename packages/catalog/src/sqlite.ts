@@ -11,9 +11,12 @@
  * never produced — SQLite keeps none, and inventing a description from a name would be the one
  * thing the catalog is not allowed to do.
  *
- * **Read-only at two layers.** `execute` applies the shared keyword gate, and the database file is
- * opened with `readOnly: true`. The keyword gate is the seam's contract; the read-only file is the
- * part that actually stops a write, including one hidden inside a query the gate cannot inspect.
+ * **Read-only at two layers.** Metadata (`test`, `fetchL1`, `fetchL2`) always opens the file with
+ * `readOnly: true`, and `execute` applies the shared keyword gate. A statement the caller allowed to
+ * write (`limits.readOnly: false`) is served by a read-write handle instead: the gate alone cannot see
+ * inside a function call, and a `PRAGMA` or a trigger may write, so the file mode is the layer that
+ * actually stops a write the gate cannot inspect. The handle cache keys on the mode, so a connection
+ * never holds two handles at once — switching mode closes the previous one before opening the next.
  *
  * **Sampling is L2 and bounded.** Only text-affinity columns of real tables are sampled, with
  * `SELECT DISTINCT … WHERE … IS NOT NULL LIMIT ?` bounded by `DialectInput.enumSampleLimit`. Views
@@ -57,6 +60,13 @@ import type { ManagedDialect } from './support.ts'
  * Node build without the builtin can disable this dialect instead of failing the whole package.
  */
 export type SqliteModule = Pick<typeof import('node:sqlite'), 'DatabaseSync'>
+
+/**
+ * Appended to every sqlite `SqlResult`: the seam advertises a statement timeout this binding cannot
+ * enforce, and a caller that is never told cannot tell a slow query from a hung one.
+ */
+export const SQLITE_TIMEOUT_WARNING =
+  'timeoutMs is not enforced by the sqlite dialect: node:sqlite cannot interrupt a running statement'
 
 /** Prefix of SQLite's own bookkeeping tables, which are schema noise rather than user objects. */
 const INTERNAL_TABLE_GLOB = 'sqlite_*'
@@ -140,7 +150,7 @@ class SqliteDialect implements ManagedDialect {
     throwIfAborted(input.signal)
     const started = Date.now()
     try {
-      const database = await this.acquire(input)
+      const database = await this.acquire(input, true)
       const row = database.prepare(SERVER_VERSION_QUERY).get()
       const version = asString(row?.['version'])
       return {
@@ -160,7 +170,7 @@ class SqliteDialect implements ManagedDialect {
    */
   async fetchL1(input: DialectInput): Promise<RawCatalog> {
     throwIfAborted(input.signal)
-    const database = await this.acquire(input)
+    const database = await this.acquire(input, true)
     throwIfAborted(input.signal)
     const target = requireTarget(input)
     const fetchedAt = Date.now()
@@ -203,7 +213,7 @@ class SqliteDialect implements ManagedDialect {
    */
   async fetchL2(input: DialectInput, l1: RawCatalog): Promise<RawCatalog> {
     throwIfAborted(input.signal)
-    const database = await this.acquire(input)
+    const database = await this.acquire(input, true)
     throwIfAborted(input.signal)
     const warnings: string[] = []
     const objects: RawObject[] = []
@@ -226,8 +236,10 @@ class SqliteDialect implements ManagedDialect {
 
   /**
    * Execute one statement. Reads are streamed and stopped at the row cap; a non-read is refused
-   * before reaching the engine when the caller asked for read-only, and otherwise fails against the
-   * read-only file handle.
+   * before reaching the engine when the caller asked for read-only, and is otherwise run against a
+   * read-write file handle. A read that hides a write channel (`EXPLAIN ANALYZE`, `INTO OUTFILE`) is
+   * refused only while the execution is read-only; `allowWrites` is the deployment's explicit "this
+   * statement may write" switch, and the gate does not second-guess it.
    *
    * `node:sqlite` compiles only the first statement of a multi-statement string and ignores the
    * rest, so a trailing `; DELETE …` is never executed — but the read-only rule still decides
@@ -248,7 +260,7 @@ class SqliteDialect implements ManagedDialect {
   ): Promise<SqlResult> {
     throwIfAborted(input.signal)
     assertReadOnlyStatement(query, limits)
-    const database = await this.acquire(input)
+    const database = await this.acquire(input, limits.readOnly)
     throwIfAborted(input.signal)
     const started = Date.now()
     const cap = clampRowLimit(limits.maxRows)
@@ -266,6 +278,7 @@ class SqliteDialect implements ManagedDialect {
           redacted: [],
           affectedRows: typeof changes === 'bigint' ? Number(changes) : changes,
           elapsedMs: Date.now() - started,
+          warnings: [SQLITE_TIMEOUT_WARNING],
         }
       }
 
@@ -289,6 +302,7 @@ class SqliteDialect implements ManagedDialect {
         truncated,
         redacted: normalized.redacted,
         elapsedMs: Date.now() - started,
+        warnings: [SQLITE_TIMEOUT_WARNING],
       }
     } catch (error) {
       if (error instanceof DbgraphError) throw error
@@ -305,23 +319,32 @@ class SqliteDialect implements ManagedDialect {
   }
 
   /**
-   * The warm read-only handle for a connection.
+   * The warm handle for a connection, in the mode the current call needs.
+   *
+   * The cache fingerprint carries the mode, so a read-only and a writable execution cannot share a
+   * handle: the entry is keyed by connection id, and a changed fingerprint closes the previous handle
+   * before the next one is opened. Replacing rather than accumulating is the point — which mode a
+   * statement runs in must be the one it asked for, not whichever mode a connection happened to
+   * open first, and one connection id owns exactly one open file.
    * @param input - the connection to open.
+   * @param readOnly - whether the handle must refuse writes.
    * @returns the cached handle.
    */
-  private async acquire(input: DialectInput): Promise<DatabaseSync> {
+  private async acquire(input: DialectInput, readOnly: boolean): Promise<DatabaseSync> {
     const target = requireTarget(input)
     return this.handles.acquire(
       input.connection.id,
-      target,
+      `${target}\u0000${readOnly ? 'ro' : 'rw'}`,
       () => {
         try {
-          // readOnly makes the "never mutate" guarantee real rather than a keyword-list promise,
-          // and it also means a mistyped path fails instead of silently creating an empty database.
-          return new this.module.DatabaseSync(target, { readOnly: true })
+          // The file mode makes the guarantee real rather than a keyword-list promise: a read-only
+          // handle also means a mistyped path fails instead of silently creating an empty database.
+          // A writable call (`allowWrites`) needs the opposite mode, or every write would fail.
+          return new this.module.DatabaseSync(target, readOnly ? { readOnly: true } : {})
         } catch (error) {
           throw new DbgraphError(
-            `cannot open SQLite database "${target}" for connection "${input.connection.id}": ${messageOf(error)}`,
+            `cannot open SQLite database "${target}" for connection "${input.connection.id}"`
+            + `${readOnly ? ' read-only' : ' for writing'}: ${messageOf(error)}`,
             'DBGRAPH_UNAVAILABLE',
           )
         }
@@ -334,7 +357,7 @@ class SqliteDialect implements ManagedDialect {
 /**
  * Create the SQLite dialect.
  * @param module - the loaded `node:sqlite` module.
- * @returns a dialect that caches one read-only handle per connection id.
+ * @returns a dialect that caches one handle per connection id, in the mode each call needs.
  */
 export function createSqliteDialect(module: SqliteModule): ManagedDialect {
   return new SqliteDialect(module)

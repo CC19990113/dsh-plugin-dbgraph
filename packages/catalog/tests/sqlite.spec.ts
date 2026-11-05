@@ -14,7 +14,7 @@ import type {
 } from 'dsh-plugin-dbgraph-service'
 import { DBGRAPH_QUERY_FAILED_CODE, DBGRAPH_READ_ONLY_CODE, REDACTED_VALUE } from '../src/support.ts'
 import type { ManagedDialect } from '../src/support.ts'
-import { createSqliteDialect } from '../src/sqlite.ts'
+import { createSqliteDialect, SQLITE_TIMEOUT_WARNING } from '../src/sqlite.ts'
 
 /** The fixture's wide table has this many columns; the test asserts every one survives. */
 const WIDE_COLUMN_COUNT = 300
@@ -499,20 +499,38 @@ describe('sqlite execute', () => {
     expect(count.rows[0]?.['total']).toBe(2)
   })
 
-  it('cannot write even when the caller allows it: the file is opened read-only', async () => {
-    try {
-      await dialect.execute(
-        input,
-        "INSERT INTO users (name) VALUES ('mallory')",
-        { ...READ_ONLY_LIMITS, readOnly: false },
-      )
-      expect.unreachable('the write should have failed against the read-only handle')
-    } catch (error) {
-      expect(error).toBeInstanceOf(DbgraphError)
-      expect((error as DbgraphError).code).toBe(DBGRAPH_QUERY_FAILED_CODE)
-    }
-    const count = await dialect.execute(input, 'SELECT COUNT(*) AS total FROM users', READ_ONLY_LIMITS)
-    expect(count.rows[0]?.['total']).toBe(2)
+  it('writes through a read-write handle when the caller allows it', async () => {
+    // The bug this pins: the handle was always opened read-only, so `allowWrites` reached the engine
+    // and failed there. A writable call must actually write, and switching back to read-only must
+    // close the writable handle first (the fingerprint carries the mode), not open a second one.
+    const inserted = await dialect.execute(
+      input,
+      "INSERT INTO people (id, name) VALUES (3, 'mallory')",
+      { ...READ_ONLY_LIMITS, readOnly: false },
+    )
+    expect(inserted.affectedRows).toBe(1)
+    expect(inserted.warnings).toEqual([SQLITE_TIMEOUT_WARNING])
+
+    const after = await dialect.execute(input, 'SELECT COUNT(*) AS total FROM people', READ_ONLY_LIMITS)
+    expect(after.rows[0]?.['total']).toBe(3)
+
+    // The read-only mode is back in force: a write is refused by the keyword gate, before the engine.
+    await expect(dialect.execute(
+      input,
+      "INSERT INTO people (id, name) VALUES (4, 'eve')",
+      READ_ONLY_LIMITS,
+    )).rejects.toMatchObject({ code: DBGRAPH_READ_ONLY_CODE })
+
+    // And a writable call after a read-only one still reaches the writable handle, so it is not a
+    // one-way switch.
+    const deleted = await dialect.execute(
+      input,
+      "DELETE FROM people WHERE name = 'mallory'",
+      { ...READ_ONLY_LIMITS, readOnly: false },
+    )
+    expect(deleted.affectedRows).toBe(1)
+    const restored = await dialect.execute(input, 'SELECT COUNT(*) AS total FROM people', READ_ONLY_LIMITS)
+    expect(restored.rows[0]?.['total']).toBe(2)
   })
 
   it('accepts a read behind leading comments', async () => {
@@ -673,5 +691,14 @@ describe('sqlite configuration and abort handling', () => {
     controller.abort()
     await expect(dialect.fetchL1({ ...input, signal: controller.signal }))
       .rejects.toMatchObject({ code: 'DBGRAPH_ABORTED' })
+  })
+})
+
+describe('sqlite timeout capability', () => {
+  it('reports that timeoutMs was not enforced', async () => {
+    // node:sqlite has no statement interrupt, so the seam's timeout is accepted and ignored. A result
+    // that never said so read exactly like a query that finished inside its budget.
+    const result = await dialect.execute(input, 'SELECT 1 AS one', READ_ONLY_LIMITS)
+    expect(result.warnings).toEqual([SQLITE_TIMEOUT_WARNING])
   })
 })

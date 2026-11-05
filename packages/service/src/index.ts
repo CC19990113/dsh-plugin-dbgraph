@@ -73,7 +73,13 @@ export type {
   StatusFile,
   StoredConnection,
 } from './schema.ts'
-export { SENSITIVE_COLUMN_PATTERNS, ZH_ALIASES, isSensitiveColumn } from './zh-aliases.ts'
+export {
+  SENSITIVE_CJK_WORDS,
+  SENSITIVE_COLUMN_PATTERNS,
+  SENSITIVE_COLUMN_TOKENS,
+  ZH_ALIASES,
+  isSensitiveColumn,
+} from './zh-aliases.ts'
 export { searchDocument, searchMatchQuery, tokenizeForSearch } from './tokenize.ts'
 export { ENGINES, OBJECT_KINDS, EDGE_KINDS } from './types.ts'
 export type {
@@ -176,6 +182,14 @@ export interface Config {
   defaultMaxRows?: number
   /** Distinct-value sample size requested from a dialect. */
   enumSampleLimit?: number
+  /**
+   * Whether `sql` may run a statement that is not a read (default `false`).
+   *
+   * Deliberately separate from a connection's `sensitiveColumns`: masking decides what a result
+   * *shows*, and it must never decide whether a statement is allowed to *write*. Turning masking off
+   * for one connection is a routine thing to do; opening every connection to DML is not.
+   */
+  allowWrites?: boolean
 }
 
 /**
@@ -215,6 +229,26 @@ export class Dbgraph extends Service implements DbgraphService {
   /** Distinct-value sample size requested from a dialect. */
   get enumSampleLimit(): number {
     return this.config.enumSampleLimit ?? DEFAULT_ENUM_SAMPLE_LIMIT
+  }
+
+  /**
+   * Whether `sql` may run a non-read statement. Off unless the deployment says otherwise.
+   * @returns the configured value; `false` when unset.
+   */
+  get allowWrites(): boolean {
+    return this.config.allowWrites === true
+  }
+
+  /**
+   * The index root the registered store reads and writes, when one is mounted.
+   *
+   * The prompt digest and the `backgroundIndex` decision read the sidecar synchronously from this
+   * path. Deriving it here from the store — rather than each caller deriving its own from the
+   * environment — is what keeps the digest and the index describing the same directory.
+   * @returns the absolute root, or `undefined` when no store is registered.
+   */
+  get storeRoot(): string | undefined {
+    return this.store?.root
   }
 
   /**
@@ -385,7 +419,9 @@ export class Dbgraph extends Service implements DbgraphService {
       {
         maxRows: clampLimit(request.limit, this.defaultMaxRows),
         timeoutMs: request.timeoutMs ?? this.queryTimeoutMs,
-        readOnly: stored.sensitiveColumns !== 'show',
+        // Never derived from the connection's masking mode: masking decides what a result shows,
+        // not whether a statement may write. `allowWrites` is the one switch that opens the gate.
+        readOnly: !this.allowWrites,
       },
     )
   }
@@ -445,16 +481,6 @@ export class Dbgraph extends Service implements DbgraphService {
       reports.push(await this.indexOne(store, target, request, signal))
     }
     return reports
-  }
-
-  /**
-   * Record a report produced out of process, so the digest sidecar tracks the file on disk.
-   * @param report - the finished run's report.
-   * @returns nothing; the report is already durable in the index.
-   */
-  async recordIndex(report: IndexReport): Promise<void> {
-    const store = await this.requireStore()
-    if (store.record !== undefined) await store.record(report)
   }
 
   /**

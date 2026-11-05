@@ -97,7 +97,12 @@ export class HandleCache<T> {
 async function settleClose<T>(entry: CachedHandle<T>): Promise<void> {
   try {
     await entry.close(await entry.ready)
-  } catch {
-    // Nothing left to release, or the release itself failed; either way disposal continues.
+  } catch (error) {
+    // Disposal continues either way, but a handle that never closed is a leaked socket or file
+    // descriptor: say so instead of dropping it.
+    console.error(
+      '[dbgraph-catalog] closing a cached handle failed:',
+      error instanceof Error ? error.message : String(error),
+    )
   }
 }

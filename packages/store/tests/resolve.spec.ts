@@ -5,12 +5,16 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createStore } from '../src/index.ts'
 import { DEFAULT_RESOLVE_OPTIONS } from '../src/resolve.ts'
+import type { RawCatalog } from 'dsh-plugin-dbgraph-service'
 import {
   SAMPLE,
   SQLITE_SAMPLE,
+  column,
   makeRoot,
   removeRoot,
   seed,
+  table,
+  wideTable,
 } from './helpers.ts'
 
 const roots: string[] = []
@@ -321,5 +325,111 @@ describe('registry errors', () => {
     await expect(store.resolve({ connection: 'never_indexed', object: 'sys_user' })).rejects.toMatchObject({
       code: 'DBGRAPH_UNAVAILABLE',
     })
+  })
+})
+
+describe('rule 2 — column bounds, fuzzy bounds, and non-Latin identifiers', () => {
+  async function seeded(snapshot: RawCatalog): Promise<ReturnType<typeof createStore>> {
+    const root = makeRoot()
+    roots.push(root)
+    const { store } = await seed(root, 'shop', snapshot)
+    stores.push(store)
+    return store
+  }
+
+  it('refuses a short field one edit away from a real column', async () => {
+    const store = await seeded({
+      engine: 'mysql',
+      database: 'shop',
+      fetchedAt: Date.now(),
+      level: 'l2',
+      objects: [table('metrics', [
+        column('id', 1, 'bigint', { isPrimaryKey: true }),
+        column('flat', 2, 'int'),
+      ])],
+    })
+    // `flag` is one substitution from `flat`; answering with `flat` would be a silent wrong column.
+    const resolution = await store.resolve({ connection: 'shop', object: 'metrics', fields: ['flag'] })
+    expect(resolution.status).toBe('not_found')
+    expect(resolution.reason).toContain('flag')
+  })
+
+  it('refuses when a short column name is one edit from the field', async () => {
+    const store = await seeded({
+      engine: 'mysql',
+      database: 'shop',
+      fetchedAt: Date.now(),
+      level: 'l2',
+      objects: [table('accounts', [
+        column('passw', 1, 'varchar(64)'),
+      ])],
+    })
+    // `passw` is one edit from `passwd`, but a 5-character ident is under the fuzzy floor: answering
+    // with it would be exactly the near-miss the floor exists to refuse.
+    const resolution = await store.resolve({ connection: 'shop', object: 'accounts', fields: ['passwd'] })
+    expect(resolution.status).toBe('not_found')
+    expect(resolution.reason).toContain('passwd')
+  })
+
+  it('still resolves a long-enough column one edit from the field', async () => {
+    const store = await seeded({
+      engine: 'mysql',
+      database: 'shop',
+      fetchedAt: Date.now(),
+      level: 'l2',
+      objects: [table('accounts', [
+        column('passwrd', 1, 'varchar(64)'),
+      ])],
+    })
+    // The floor applies to the candidate, not to the whole rule: a 7-character column still matches.
+    const resolution = await store.resolve({ connection: 'shop', object: 'accounts', fields: ['passwd'] })
+    expect(resolution.status).toBe('resolved')
+    expect(resolution.resolved?.columns[0]?.column).toBe('passwrd')
+    expect(resolution.resolved?.columns[0]?.matchedBy).toBe('fuzzy')
+  })
+
+  it('refuses when two long names are one edit from the field', async () => {
+    const store = await seeded({
+      engine: 'mysql',
+      database: 'shop',
+      fetchedAt: Date.now(),
+      level: 'l2',
+      objects: [table('accounts', [
+        column('passward', 1, 'varchar(64)'),
+        column('pasaword', 2, 'varchar(64)'),
+      ])],
+    })
+    const resolution = await store.resolve({ connection: 'shop', object: 'accounts', fields: ['password'] })
+    expect(resolution.status).toBe('not_found')
+  })
+
+  it('names the column cap instead of claiming a wide table has no such field', async () => {
+    const store = await seeded({ ...SAMPLE, objects: [wideTable('big', 520)] })
+    const missing = await store.resolve({ connection: 'shop', object: 'big', fields: ['c520'] })
+    expect(missing.status).toBe('not_found')
+    expect(missing.reason).toContain('只检查了前 500 列')
+    const inside = await store.resolve({ connection: 'shop', object: 'big', fields: ['c500'] })
+    expect(inside.status).toBe('resolved')
+    expect(inside.resolved?.columns[0]?.column).toBe('c500')
+  })
+
+  it('resolves fields and a predicate on Cyrillic identifiers', async () => {
+    const store = await seeded({
+      engine: 'mysql',
+      database: 'shop',
+      fetchedAt: Date.now(),
+      level: 'l2',
+      objects: [table('клиенты', [
+        column('id', 1, 'bigint', { isPrimaryKey: true }),
+        column('имя', 2, 'varchar(64)', { comment: 'имя клиента' }),
+      ])],
+    })
+    const byField = await store.resolve({ connection: 'shop', object: 'клиенты', fields: ['имя'] })
+    expect(byField.status).toBe('resolved')
+    expect(byField.resolved?.columns[0]?.column).toBe('имя')
+    expect(byField.resolved?.columns[0]?.matchedBy).toBe('name')
+    const byWhere = await store.resolve({ connection: 'shop', object: 'клиенты', where: { 'имя': 'Иван' } })
+    expect(byWhere.status).toBe('resolved')
+    expect(byWhere.predicate).toEqual({ clause: 'WHERE `имя` = ?', values: ['Иван'] })
   })
 })

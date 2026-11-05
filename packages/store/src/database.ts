@@ -2,7 +2,7 @@
  * Opening an index file, verifying its format version, and keeping a bounded number of connections
  * warm.
  *
- * Databases open READ-ONLY. A writer replaces the file wholesale (`index.db.tmp` → rename) while this
+ * Databases open READ-ONLY. A writer replaces the file wholesale (a per-run staging file → rename) while this
  * reader may be serving a query, so the store never takes a write lock and never repairs a file it does
  * not own. The pool therefore keys a cached handle on the path's *on-disk identity* (`dev:ino`): after
  * a rename the path names a new inode, the cached handle is stale, and the next read reopens instead of
@@ -182,8 +182,10 @@ export class IndexPool {
   private closeEntry(entry: PoolEntry): void {
     try {
       entry.opened.db.close()
-    } catch {
-      // A handle that already died (or was closed by an eviction) needs no second close.
+    } catch (error) {
+      // A handle that already died needs no second close, but a failure here can leak a descriptor:
+      // one line is enough to notice it.
+      console.error('[dbgraph-store] closing a cached index handle failed:', messageOf(error))
     }
   }
 

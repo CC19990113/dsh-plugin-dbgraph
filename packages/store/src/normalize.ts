@@ -92,13 +92,17 @@ export function normalizeComment(comment: string | undefined): string | undefine
  * Fold an identifier for exact and fuzzy comparison: NFKC, lower-case, and every separator removed, so
  * `user_id`, `userId` and `USER-ID` all become `userid`.
  * @param name - the identifier (or a user's word).
- * @returns the folded form; empty when the input holds no alphanumeric or CJK character.
+ * @returns the folded form; empty when the input holds no letter or digit.
  */
 export function normalizeIdentifier(name: string): string {
   return name
     .normalize('NFKC')
     .toLowerCase()
-    .replace(/[^a-z0-9\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g, '')
+    // Every Unicode letter and number survives, not just ASCII and CJK: folding a Cyrillic or
+    // accented identifier to '' would make it unmatchable, and `find` would then answer "no such
+    // column" about a column that exists. `\p{Alphabetic}\p{N}` is the set the Rust twin's
+    // `char::is_alphanumeric` reports, so the two writers keep folding to the same form.
+    .replace(/[^\p{Alphabetic}\p{N}]/gu, '')
 }
 
 /**

@@ -429,7 +429,7 @@ describe('the eight query operations forward to the seam', () => {
     expect(result.isError === false && result.value).toMatchObject({
       connections: [{ id: 'local', engine: 'sqlite', credential_configured: false, index: { objects: 0, columns: 0, stale: true } }],
     })
-    expect(textOf(result)).toContain('local (sqlite) no target recorded — not indexed, credential missing')
+    expect(textOf(result)).toContain('local (sqlite) no target recorded — not indexed')
   })
 
   it('schema', async () => {

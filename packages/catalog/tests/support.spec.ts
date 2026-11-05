@@ -7,6 +7,7 @@ import {
   assertReadOnlyStatement,
   clampRowLimit,
   DBGRAPH_READ_ONLY_CODE,
+  describeWriteChannel,
   firstStatementKeyword,
   isReadStatement,
   isSensitiveName,
@@ -61,6 +62,48 @@ describe('isReadStatement', () => {
     }
     expect(isReadStatement('')).toBe(false)
   })
+
+  it('only looks at the first keyword: a disguised write is still "a read" to this predicate', () => {
+    // `sqlite.ts` uses this predicate to choose between run() and iterate(), so it must keep its
+    // narrow meaning; the write-channel refusal lives in `assertReadOnlyStatement`, not here.
+    expect(isReadStatement('EXPLAIN ANALYZE UPDATE t SET a = 1')).toBe(true)
+    expect(isReadStatement("SELECT 1 INTO OUTFILE '/tmp/x'")).toBe(true)
+  })
+})
+
+describe('describeWriteChannel', () => {
+  it('reports nothing for a statement that cannot write', () => {
+    expect(describeWriteChannel('SELECT 1')).toBeUndefined()
+    expect(describeWriteChannel('  -- comment\nSHOW TABLES')).toBeUndefined()
+    expect(describeWriteChannel('EXPLAIN SELECT * FROM users')).toBeUndefined()
+    expect(describeWriteChannel('-- c\nEXPLAIN /* x */ SELECT 1')).toBeUndefined()
+    expect(describeWriteChannel('')).toBeUndefined()
+  })
+
+  it('names EXPLAIN of anything but a SELECT, because EXPLAIN ANALYZE executes it', () => {
+    expect(describeWriteChannel('EXPLAIN ANALYZE UPDATE t SET a = 1')).toContain('EXPLAIN ANALYZE')
+    expect(describeWriteChannel('explain analyze delete from t')).toContain('EXPLAIN ANALYZE')
+    expect(describeWriteChannel('EXPLAIN QUERY PLAN SELECT 1')).toContain('EXPLAIN QUERY')
+    expect(describeWriteChannel('EXPLAIN')).toContain('EXPLAIN')
+  })
+
+  it('names INTO OUTFILE / INTO DUMPFILE anywhere in the statement', () => {
+    expect(describeWriteChannel("SELECT * FROM t INTO OUTFILE '/tmp/leak.txt'")).toContain('INTO OUTFILE')
+    expect(describeWriteChannel("select * from t into dumpfile '/tmp/x'")).toContain('INTO DUMPFILE')
+    expect(describeWriteChannel("SELECT id\nFROM t\nINTO/**/OUTFILE '/tmp/x'")).toContain('INTO OUTFILE')
+  })
+
+  it('strips comments first, so a channel cannot be hidden behind one', () => {
+    expect(describeWriteChannel('SELECT /* into outfile */ 1')).toBeUndefined()
+    expect(describeWriteChannel('SELECT 1 -- into outfile')).toBeUndefined()
+    expect(describeWriteChannel("SELECT -- note\n * FROM t INTO OUTFILE '/x'")).toContain('INTO OUTFILE')
+  })
+
+  it('keeps quoted text, so a phrase in a literal errs toward refusing', () => {
+    expect(describeWriteChannel("SELECT 'INTO OUTFILE' AS label")).toContain('INTO OUTFILE')
+    // A `--` inside a literal is not a comment: it must not swallow the real clause that follows.
+    expect(describeWriteChannel("SELECT '--' INTO OUTFILE '/tmp/x'")).toContain('INTO OUTFILE')
+  })
 })
 
 describe('assertReadOnlyStatement', () => {
@@ -86,6 +129,59 @@ describe('assertReadOnlyStatement', () => {
 
   it('does not gate anything when the caller allowed writes', () => {
     expect(() => assertReadOnlyStatement('UPDATE t SET a = 1', WRITABLE)).not.toThrow()
+    expect(() => assertReadOnlyStatement('EXPLAIN ANALYZE UPDATE t SET a = 1', WRITABLE)).not.toThrow()
+    expect(() => assertReadOnlyStatement("SELECT 1 INTO OUTFILE '/tmp/x'", WRITABLE)).not.toThrow()
+  })
+})
+
+describe('assertReadOnlyStatement — write channels behind a read keyword', () => {
+  /**
+   * Run one refused statement and report its code plus message.
+   * @param query - the statement to refuse.
+   * @returns the thrown error's code and message.
+   */
+  function refusal(query: string): { code: string; message: string } {
+    try {
+      assertReadOnlyStatement(query, READ_ONLY)
+    } catch (error) {
+      expect(error).toBeInstanceOf(DbgraphError)
+      const dbgraph = error as DbgraphError
+      return { code: dbgraph.code, message: dbgraph.message }
+    }
+    expect.unreachable(`the statement should have been refused: ${query}`)
+  }
+
+  it('refuses EXPLAIN ANALYZE and says it executes the statement', () => {
+    const refused = refusal('EXPLAIN ANALYZE UPDATE users SET password = NULL')
+    expect(refused.code).toBe(DBGRAPH_READ_ONLY_CODE)
+    expect(refused.message).toContain('EXPLAIN ANALYZE')
+    expect(refused.message).toContain('executes')
+  })
+
+  it('refuses SELECT ... INTO OUTFILE and SELECT ... INTO DUMPFILE', () => {
+    for (const query of [
+      "SELECT * FROM users INTO OUTFILE '/tmp/users.txt'",
+      "SELECT * FROM users INTO DUMPFILE '/tmp/users.bin'",
+    ]) {
+      const refused = refusal(query)
+      expect(refused.code).toBe(DBGRAPH_READ_ONLY_CODE)
+      expect(refused.message).toContain('writes a file on the server')
+    }
+  })
+
+  it('still admits EXPLAIN of a SELECT', () => {
+    expect(() => assertReadOnlyStatement('EXPLAIN SELECT * FROM users', READ_ONLY)).not.toThrow()
+  })
+
+  it('keeps refusing keywords that are never reads', () => {
+    expect(refusal('PRAGMA table_info(users)').message).toContain('PRAGMA')
+    expect(refusal("ATTACH DATABASE '/tmp/evil.db' AS evil").message).toContain('ATTACH')
+  })
+
+  it('admits a read with a second statement behind it: the engine compiles only the first', () => {
+    // node:sqlite ignores everything after the first statement, and mysql2 refuses it without
+    // multipleStatements. The gate deliberately does not try to parse the tail.
+    expect(() => assertReadOnlyStatement('SELECT 1; DROP TABLE users', READ_ONLY)).not.toThrow()
   })
 })
 

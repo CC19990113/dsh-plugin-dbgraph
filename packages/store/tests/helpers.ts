@@ -5,7 +5,7 @@
  * @module dsh-plugin-dbgraph-store-tests/helpers
  */
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -52,9 +52,9 @@ export function table(name: string, columns: readonly RawColumn[], extra: Partia
 }
 
 /** A 300-column table, the shape a real wide report table has. */
-export function wideTable(name = 'wide_table'): RawObject {
+export function wideTable(name = 'wide_table', columnCount = 300): RawObject {
   const columns: RawColumn[] = [column('id', 1, 'bigint', { isPrimaryKey: true })]
-  for (let index = 2; index <= 300; index += 1) {
+  for (let index = 2; index <= columnCount; index += 1) {
     columns.push(column(`c${String(index).padStart(3, '0')}`, index, 'varchar(32)', {
       ...(index === 2 ? { comment: '第一列' } : {}),
     }))
@@ -183,6 +183,12 @@ export async function seed(
   const store = createStore({ root, ...config })
   const report = await store.write(connectionId(id), snapshot, { writer: 'js', aliases })
   return { store, report }
+}
+
+/** Whether any staging file for one connection is left on disk. */
+export function hasStagingFile(root: string, id = 'shop'): boolean {
+  const directory = join(root, id)
+  return existsSync(directory) && readdirSync(directory).some(name => name.endsWith('.tmp'))
 }
 
 /** Open a connection's index read-only, for row-level assertions. */

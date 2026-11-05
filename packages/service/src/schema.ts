@@ -8,7 +8,8 @@
  *   the host's credential seam, referenced by name.
  * - `<connection>/index.db` — one SQLite file per connection, replaced wholesale on every run. That
  *   single decision removes a whole class of bugs: no incremental diffing, no deletes, no
- *   half-updated index. A run writes `<connection>/index.db.tmp` and renames it into place.
+ *   half-updated index. A run writes `<connection>/index.db.<pid>-<nonce>.tmp` and renames it into
+ *   place, so two runs never share a staging file.
  * - `status.json` — a digest of every connection's index state plus its object list, small enough to
  *   read synchronously on every prompt assembly. It exists so the model learns the schema without
  *   spending a tool call, and so nothing opens SQLite during assembly.
@@ -49,10 +50,8 @@ export const DEFAULT_INDEX_STALE_HOURS = 6
  * The statements that create a fresh index. Applied in order inside one transaction; the writer
  * executes them against a `.tmp` file that only becomes the index after the rename.
  *
- * `search` is FTS5 *contentless*: the index is replaced wholesale on every run, so nothing is ever
- * deleted, and a contentless table stores only what is needed to rank — roughly 40% smaller than the
- * same rows with their text. Ranking is the only thing it is used for; the readable text lives in
- * `objects` and `columns`.
+ * `search` keeps its rows (a contentful FTS5 table) so the identity columns read back; the inline
+ * comment beside the DDL below records why a contentless table was rejected rather than kept.
  */
 export const INDEX_SCHEMA_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (

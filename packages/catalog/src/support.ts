@@ -8,7 +8,9 @@
  *   are admitted, everything else throws {@link DBGRAPH_READ_ONLY_CODE} when the caller asked for a
  *   read-only run. Keyword filtering is a policy gate, not a sandbox — a dialect that can open its
  *   store read-only (SQLite) does so as well, because a keyword list cannot see inside a function
- *   call.
+ *   call. A statement whose first word is a read keyword is not enough on its own: an `EXPLAIN ANALYZE`
+ *   executes the statement it claims to describe, and a `SELECT … INTO OUTFILE` writes a file on the
+ *   server. {@link describeWriteChannel} names those channels and the gate refuses them too.
  * - **Rows leave a dialect already JSON-safe.** `Date` becomes ISO text, binary becomes the hex
  *   marker {@link renderBinary} builds, `bigint` becomes text, and a nested object is normalized
  *   recursively. A transcript that persists a tool result must never choke on a value the driver
@@ -70,15 +72,23 @@ export function messageOf(error: unknown): string {
 /** Statement keywords treated as an obvious read for the read-only gate. */
 const READ_STATEMENT_KEYWORDS: ReadonlySet<string> = new Set(['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN'])
 
+/** One word located by {@link scanStatementWord}: its upper-cased text and where it ends. */
+interface ScannedWord {
+  /** The upper-cased ASCII word. */
+  readonly word: string
+  /** Offset of the first character after the word. */
+  readonly end: number
+}
+
 /**
- * The first SQL keyword of a statement, with leading whitespace and `--` / block comments skipped.
- * Deliberately lexical: it is the same cheap check every dialect applies, and it never rewrites the
- * statement it inspects.
+ * The next ASCII word at or after `from`, skipping whitespace and `--` / block comments.
+ * Deliberately lexical: it never rewrites the statement it inspects.
  * @param query - the statement text.
- * @returns the upper-cased first keyword, or `undefined` for an empty/comment-only statement.
+ * @param from - the offset to start scanning at.
+ * @returns the word and its end, or `undefined` when the rest carries no word.
  */
-export function firstStatementKeyword(query: string): string | undefined {
-  let index = 0
+function scanStatementWord(query: string, from: number): ScannedWord | undefined {
+  let index = from
   while (index < query.length) {
     if (query.startsWith('--', index)) {
       const end = query.indexOf('\n', index + 2)
@@ -98,9 +108,20 @@ export function firstStatementKeyword(query: string): string | undefined {
       continue
     }
     const match = /^[A-Za-z]+/.exec(query.slice(index))
-    return match?.[0]?.toUpperCase()
+    const word = match?.[0]
+    if (word === undefined) return undefined
+    return { word: word.toUpperCase(), end: index + word.length }
   }
   return undefined
+}
+
+/**
+ * The first SQL keyword of a statement, with leading whitespace and `--` / block comments skipped.
+ * @param query - the statement text.
+ * @returns the upper-cased first keyword, or `undefined` for an empty/comment-only statement.
+ */
+export function firstStatementKeyword(query: string): string | undefined {
+  return scanStatementWord(query, 0)?.word
 }
 
 /**
@@ -114,15 +135,138 @@ export function isReadStatement(query: string): boolean {
 }
 
 /**
+ * Copy a quoted SQL literal or identifier verbatim, escapes included, so a `--` or `/*` inside it is
+ * not mistaken for a comment. MySQL spells an escaped quote both `\'` and `''`; backticks only double.
+ * @param query - the statement text.
+ * @param start - the offset of the opening quote.
+ * @returns the offset just past the closing quote, or the statement's end when it is unterminated.
+ */
+function skipQuoted(query: string, start: number): number {
+  const quote = query.charAt(start)
+  let index = start + 1
+  while (index < query.length) {
+    const char = query.charAt(index)
+    if (char === '\\' && quote !== '`') {
+      index += 2
+      continue
+    }
+    if (char === quote) {
+      if (query.charAt(index + 1) === quote) {
+        index += 2
+        continue
+      }
+      return index + 1
+    }
+    index += 1
+  }
+  return query.length
+}
+
+/**
+ * The statement text with every comment replaced by one space, quoted text left untouched.
+ *
+ * Quoted text must survive: stripping `--` naively would let `SELECT '--' INTO OUTFILE …` hide the
+ * write clause from the check below while the engine still executes it.
+ * @param query - the statement text.
+ * @returns the statement without comments.
+ */
+function stripSqlComments(query: string): string {
+  let stripped = ''
+  let index = 0
+  while (index < query.length) {
+    if (query.startsWith('--', index)) {
+      const end = query.indexOf('\n', index + 2)
+      if (end === -1) return stripped
+      stripped += ' '
+      index = end + 1
+      continue
+    }
+    if (query.startsWith('/*', index)) {
+      const end = query.indexOf('*/', index + 2)
+      if (end === -1) return stripped
+      stripped += ' '
+      index = end + 2
+      continue
+    }
+    const char = query.charAt(index)
+    if (char === "'" || char === '"' || char === '`') {
+      const end = skipQuoted(query, index)
+      stripped += query.slice(index, end)
+      index = end
+      continue
+    }
+    stripped += char
+    index += 1
+  }
+  return stripped
+}
+
+/** A phrase that turns an otherwise-read statement into a write, and how to describe it. */
+const WRITE_CHANNEL_PHRASES: readonly { readonly pattern: RegExp; readonly described: string }[] = [
+  {
+    pattern: /\bINTO\s+OUTFILE\b/,
+    described: 'a statement with a SELECT ... INTO OUTFILE clause, which writes a file on the server',
+  },
+  {
+    pattern: /\bINTO\s+DUMPFILE\b/,
+    described: 'a statement with a SELECT ... INTO DUMPFILE clause, which writes a file on the server',
+  },
+]
+
+/**
+ * Describe the write channel a statement hides behind a read keyword, if it has one.
+ *
+ * Two statement shapes begin like a read and are not one:
+ *
+ * - `EXPLAIN <word>` with anything but `SELECT` after it. `EXPLAIN ANALYZE UPDATE …` genuinely
+ *   executes the update (MySQL runs the statement and reports its plan), so admitting it because its
+ *   first word is `EXPLAIN` would let a read-only execution write rows.
+ * - `SELECT … INTO OUTFILE` / `INTO DUMPFILE`, which write a file on the database server even though
+ *   the statement starts with `SELECT`.
+ *
+ * The check is lexical, like the keyword gate it extends: it names the channel rather than proving
+ * one, and it deliberately errs toward refusing. Comments are stripped first, but quoted text is
+ * kept, so a quoted phrase refuses a harmless statement rather than hiding a real clause.
+ * @param query - the statement text.
+ * @returns a human-readable description of the write channel, or `undefined` when there is none.
+ */
+export function describeWriteChannel(query: string): string | undefined {
+  const first = scanStatementWord(query, 0)
+  if (first === undefined) return undefined
+  if (first.word === 'EXPLAIN') {
+    const explained = scanStatementWord(query, first.end)
+    if (explained === undefined) {
+      return 'an "EXPLAIN" statement with no statement after it to describe'
+    }
+    if (explained.word !== 'SELECT') {
+      return `an "EXPLAIN ${explained.word}" statement, which executes the statement it explains instead of only planning it`
+    }
+  }
+  const normalized = stripSqlComments(query).toUpperCase()
+  for (const phrase of WRITE_CHANNEL_PHRASES) {
+    if (phrase.pattern.test(normalized)) return phrase.described
+  }
+  return undefined
+}
+
+/**
  * Enforce the read-only execution contract: when the caller asked for a read-only run, a statement
- * that is not obviously a read is refused before it reaches the engine.
+ * that is not obviously a read is refused before it reaches the engine — and so is a read keyword
+ * that is only a disguise (see {@link describeWriteChannel}).
  * @param query - the statement text.
  * @param limits - the caller's execution limits.
  * @throws DbgraphError with {@link DBGRAPH_READ_ONLY_CODE} when the statement is refused.
  */
 export function assertReadOnlyStatement(query: string, limits: ExecuteLimits): void {
   if (!limits.readOnly) return
-  if (isReadStatement(query)) return
+  if (isReadStatement(query)) {
+    const channel = describeWriteChannel(query)
+    if (channel === undefined) return
+    throw new DbgraphError(
+      `read-only execution refused ${channel}; only statements that cannot write are admitted`,
+      DBGRAPH_READ_ONLY_CODE,
+    )
+  }
   const keyword = firstStatementKeyword(query)
   const described = keyword === undefined
     ? 'an empty or comment-only statement'

@@ -112,8 +112,9 @@ data is identical — only that one warning line differs.
 
 ## Index format
 
-One SQLite file per connection, replaced wholesale on every run (write to `index.db.tmp`, then
-rename). That single decision removes incremental diffing, deletes, and half-updated indexes.
+One SQLite file per connection, replaced wholesale on every run (write to a staging file named
+`<index>.<pid>-<nonce>.tmp`, then rename). The nonce is per run, so two runs never share the staging
+file. That single decision removes incremental diffing, deletes, and half-updated indexes.
 
 ```
 meta      key/value: engine, database, schemaVersion, l1IndexedAt, l2IndexedAt

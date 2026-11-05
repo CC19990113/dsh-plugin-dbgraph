@@ -9,7 +9,7 @@
  */
 
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtempSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -40,13 +40,15 @@ class FakeTools extends Service {
 /** A stand-in for the host's system-prompt registry: records sections, renders nothing. */
 class FakeSystemPrompt extends Service {
   readonly sections: string[] = []
+  readonly registered: { name: string; text?: string | (() => string) }[] = []
 
   constructor(ctx: Context) {
     super(ctx, 'systemPrompt')
   }
 
-  section(section: { name: string }): () => void {
+  section(section: { name: string; text?: string | (() => string) }): () => void {
     this.sections.push(section.name)
+    this.registered.push(section)
     return () => {
       const at = this.sections.indexOf(section.name)
       if (at >= 0) this.sections.splice(at, 1)
@@ -274,5 +276,33 @@ describe('the bundle, end to end', () => {
 
     const refs = await ctx.dbgraph.refs({ connection: 'local', object: 'sys_user' })
     expect(refs.entries.length).toBeGreaterThan(0)
+  })
+})
+
+describe('the index root is single-sourced', () => {
+  it('reads the prompt digest from the store root, not from the environment', async () => {
+    const storeRoot = mkdtempSync(join(tmpdir(), 'dbgraph-bundle-store-'))
+    try {
+      const ctx = new Context()
+      await ctx.plugin(Dbgraph)
+      await ctx.plugin(CatalogPlugin)
+      // A root given to the store must be the root the digest reads, even though the environment
+      // (set by beforeEach) points somewhere else.
+      await ctx.plugin(StorePlugin, { root: storeRoot })
+      await ctx.plugin(FakeTools)
+      await ctx.plugin(FakeSystemPrompt)
+      await ctx.plugin(ToolPlugin)
+      writeFileSync(join(storeRoot, 'connections.json'), connectionsDocument(), { mode: 0o600 })
+      await ctx.dbgraph.index({ connection: 'local', mode: 'full', writer: 'js' })
+
+      const prompt = ctx.get('systemPrompt') as FakeSystemPrompt
+      const text = prompt.registered[0]?.text
+      expect(typeof text).toBe('function')
+      const rendered = (text as () => string)()
+      expect(rendered).toContain('sys_user')
+      expect(rendered).not.toContain('还没有建立数据库索引')
+    } finally {
+      rmSync(storeRoot, { recursive: true, force: true })
+    }
   })
 })
