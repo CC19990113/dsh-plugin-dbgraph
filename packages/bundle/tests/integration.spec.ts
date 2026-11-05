@@ -179,10 +179,16 @@ describe('the bundle, end to end', () => {
     expect(result.status).toBe('resolved')
     expect(result.rows?.[0]?.['passwd']).toBe('[REDACTED]')
 
-    const native = await ctx.dbgraph.index({ connection: 'local', mode: 'full', writer: 'rust' })
-    expect(native.writer).toBe('rust')
-    expect(native.objects).toBe(auto.objects)
-    expect(native.columns).toBe(auto.columns)
+    // The Rust writer is an optional accelerator: `crates/*/artifacts` is gitignored, so a fresh
+    // checkout — CI included — has the JavaScript writer only, and asking for `writer: 'rust'` with
+    // no addon is `DBGRAPH_UNAVAILABLE`. The parity claim is only meaningful where the addon exists,
+    // and `auto` picking 'rust' is exactly that proof.
+    if (auto.writer === 'rust') {
+      const native = await ctx.dbgraph.index({ connection: 'local', mode: 'full', writer: 'rust' })
+      expect(native.writer).toBe('rust')
+      expect(native.objects).toBe(auto.objects)
+      expect(native.columns).toBe(auto.columns)
+    }
   })
 
   it('answers "the user\'s password" with one resolve-then-execute pass, masking the secret', async () => {
